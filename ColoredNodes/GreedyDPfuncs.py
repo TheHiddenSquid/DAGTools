@@ -4,12 +4,14 @@ import random
 import time
 from collections.abc import Iterable
 
-import ges
-import matplotlib.pyplot as plt
 import networkx as nx
 import numpy as np
-import utils
-from utils import get_optimal_partition, optimal_partition_core
+if __package__:
+    from . import utils
+    from .utils import get_optimal_partition, optimal_partition_core
+else:
+    import utils
+    from utils import get_optimal_partition, optimal_partition_core
 from numba import njit
 
 """
@@ -19,7 +21,8 @@ DAGs during the optimization. The drawback is O(p^2) extra computation each iter
 
 # Main functions
 
-def CausalGreedyDP(samples, num_starts = 5, moves = None, *, center=True):
+def CausalGreedyDP(samples, num_starts = 5, moves = None, *, center=True,
+                   A0=None, return_dag=False, on_progress=None):
     """Find a colored graph, centering each column by default.
 
     Set center=False for already-centered samples or an intentionally fixed
@@ -52,7 +55,7 @@ def CausalGreedyDP(samples, num_starts = 5, moves = None, *, center=True):
 
 
     # Setup iterations
-    best_A = np.zeros((num_nodes, num_nodes))
+    best_A = np.zeros((num_nodes, num_nodes)) if A0 is None else np.array(A0, dtype=np.int64, copy=True)
     num_edges = np.count_nonzero(best_A)
     best_bic, best_ss_res, _ = score_DAG_full(best_A)
 
@@ -60,22 +63,28 @@ def CausalGreedyDP(samples, num_starts = 5, moves = None, *, center=True):
     num_colors = [int(x) for x in np.linspace(1,num_nodes,num_starts)]
 
     visited = set()
+    total_steps = 0
+    if on_progress:
+        on_progress({"iteration": 0, "restart": 0, "total": num_starts, "score": float(best_bic), "best_score": float(best_bic)})
 
     
     # Perform iterations
     for i in range(num_starts):
         _, lambda_matrix, _ = utils.generate_colored_DAG(num_nodes, num_colors[i], edge_probs[i])
         A = np.array(lambda_matrix != 0, dtype=np.int64)
+        if A0 is not None and i == 0:
+            A = np.array(A0, dtype=np.int64, copy=True)
 
         num_edges = np.count_nonzero(A)
         bic, ss_res, _ = score_DAG_full(A)
+        if bic > best_bic:
+            best_A, best_ss_res, best_bic = A.copy(), ss_res.copy(), bic
         sorted_edges = get_sorted_edges(A)
         done = False
 
         while not done:
             key = A.tobytes()
             if key in visited:
-                print("skip")
                 break   # This continuation was already explored by an earlier start.
             visited.add(key)
 
@@ -84,10 +93,17 @@ def CausalGreedyDP(samples, num_starts = 5, moves = None, *, center=True):
                 best_A = A.copy()
                 best_ss_res = ss_res.copy()
                 best_bic = bic
+            total_steps += 1
+            if on_progress:
+                on_progress({"iteration": total_steps, "restart": i + 1, "total": num_starts, "score": float(bic), "best_score": float(best_bic)})
 
     # Ectract optimal partition
     best_P, _ = get_optimal_partition(best_ss_res, BIC_constant, size_term)
     CPDAG_A = utils.getCPDAG(best_A, best_P)
+    if on_progress:
+        on_progress({"iteration": total_steps, "restart": num_starts, "total": num_starts, "score": float(bic), "best_score": float(best_bic)})
+    if return_dag:
+        return CPDAG_A, best_P, best_bic, best_A.copy()
     return CPDAG_A, best_P, best_bic
     
 def iteration(A, bic, ss_res, sorted_edges):
@@ -392,6 +408,7 @@ def is_improvement(candidate, current):
 
 
 def main():
+    import matplotlib.pyplot as plt
     #random.seed(2)
     #np.random.seed(2)
     no_nodes = 6

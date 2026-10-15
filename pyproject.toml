@@ -1,0 +1,27 @@
+[build-system]
+requires = ["setuptools>=69"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "dagdiscovery-lab"
+version = "0.1.0"
+description = "A local interactive workbench for colored Gaussian DAG discovery"
+requires-python = ">=3.11"
+dependencies = [
+  "numpy>=1.26,<3", "scipy>=1.12,<2", "networkx>=3.4,<4",
+  "numba>=0.61,<1", "fastapi>=0.115,<1", "uvicorn>=0.30,<1",
+  "python-multipart>=0.0.20,<1"
+]
+
+[project.optional-dependencies]
+test = ["pytest>=8,<10", "httpx>=0.27,<1"]
+
+[project.scripts]
+dag-lab = "daglab.cli:main"
+
+[tool.setuptools.packages.find]
+include = ["daglab*", "ColoredNodes*"]
+exclude = ["ColoredNodes.gibbs*", "tests*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

@@ -3,7 +3,10 @@ import functools
 import math
 
 import numpy as np
-import utils
+if __package__:
+    from . import utils
+else:
+    import utils
 from numba import njit
 
 """
@@ -13,7 +16,8 @@ This is fast per iteratation, but the search space grows extremely quick with p.
 
 # Main functions
 
-def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, refine_partition=True):
+def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, refine_partition=True,
+                      A0=None, P0=None, return_dag=False, on_progress=None):
     """Find a colored graph, centering each column by default.
 
     Set center=False for already-centered samples or an intentionally fixed
@@ -22,6 +26,10 @@ def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, ref
     before selecting the overall winner. Set refine_partition=False to retain
     the local-search coloring, including when intentionally fixing colors.
     Refinement does not resume the graph search.
+    Optional A0/P0 seed the first restart; P0 is used for every restart when
+    supplied. Disable color moves and refinement to hold that partition fixed.
+    return_dag appends the representative DAG to the legacy return tuple.
+    on_progress receives iteration/restart/score dictionaries.
     """
     
     #Clear cache for new run of algorithm
@@ -49,28 +57,39 @@ def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, ref
 
 
     # Setup iterations
-    best_A = np.zeros((num_nodes, num_nodes))
+    best_A = np.zeros((num_nodes, num_nodes)) if A0 is None else np.array(A0, dtype=np.int64, copy=True)
     num_edges = np.count_nonzero(best_A)
-    best_P = [{i} for i in range(num_nodes)]
+    best_P = [{i} for i in range(num_nodes)] if P0 is None else [set(block) for block in P0 if block]
+    best_P += [set() for _ in range(num_nodes-len(best_P))]
     best_bic, initial_ML_data = score_DAG_full(best_A, best_P)
     if refine_partition:
         refined_P, cost = utils.get_optimal_partition(initial_ML_data[0], BIC_constant)
-        if -cost > best_bic:  # The initial fallback graph has no edges.
-            best_P, best_bic = refined_P, -cost
+        refined_bic = -cost - BIC_constant * num_edges
+        if refined_bic > best_bic:
+            best_P, best_bic = refined_P, refined_bic
 
     edge_probs = list(np.linspace(0,1,num_starts))
     num_colors = [int(x) for x in np.linspace(1,num_nodes,num_starts)]
 
     
+    total_steps = 0
+    if on_progress:
+        on_progress({"iteration": 0, "restart": 0, "total": num_starts, "score": float(best_bic), "best_score": float(best_bic)})
     # Perform iterations
     for i in range(num_starts):
         P, lambda_matrix, _ = utils.generate_colored_DAG(num_nodes, num_colors[i], edge_probs[i])
         A = np.array(lambda_matrix != 0, dtype=np.int64)
+        if A0 is not None and i == 0:
+            A = np.array(A0, dtype=np.int64, copy=True)
+        if P0 is not None:
+            P = [set(block) for block in P0 if block]
         for _ in range(num_nodes-len(P)):
             P.append(set())
 
         num_edges = np.count_nonzero(A)
         bic, ML_data = score_DAG_full(A, P)
+        if bic > best_bic:
+            best_A, best_P, best_bic = A.copy(), utils.sorted_partition(P), bic
         sorted_edges = get_sorted_edges(A)
         done = False
 
@@ -80,6 +99,9 @@ def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, ref
                 best_A = A.copy()
                 best_P = utils.sorted_partition(P)
                 best_bic = bic
+            total_steps += 1
+            if on_progress:
+                on_progress({"iteration": total_steps, "restart": i + 1, "total": num_starts, "score": float(bic), "best_score": float(best_bic)})
 
         if refine_partition:
             # The terminal graph's residuals are already current in ML_data.
@@ -91,6 +113,10 @@ def CausalGreedyColor(samples, num_starts = 5, moves = None, *, center=True, ref
                 best_bic = refined_bic
 
     CPDAG_A = utils.getCPDAG(best_A, best_P)
+    if on_progress:
+        on_progress({"iteration": total_steps, "restart": num_starts, "total": num_starts, "score": float(bic), "best_score": float(best_bic)})
+    if return_dag:
+        return CPDAG_A, best_P, best_bic, best_A.copy()
     return CPDAG_A, best_P, best_bic
     
 def iteration(A, P, bic, ML_data, sorted_edges):

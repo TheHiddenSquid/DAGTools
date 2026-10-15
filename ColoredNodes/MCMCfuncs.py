@@ -4,13 +4,17 @@ import time
 from collections import defaultdict
 
 import numpy as np
-import utils
+if __package__:
+    from . import utils
+else:
+    import utils
 from numba import njit
 
 # Main MCMC functions
 
 def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = None, P0 = None, debug = False,
-               *, return_history=False, target_bic=None, chunk_size=10_000, center=True, refine_partition=True):
+               *, return_history=False, target_bic=None, chunk_size=10_000, center=True, refine_partition=True,
+               return_dag=False, on_progress=None):
     """
     Run MCMC to find the colored DAG that best fits the data. By default,
     center each column without modifying the input array.
@@ -201,6 +205,8 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
     partition_refinement_gain = None
 
     def finish(result):
+        if return_dag:
+            result = (*result, best_A.copy())
         if return_history or target_bic is not None:
             # Release unused capacity when a target stops the chain early.
             history = bic_history
@@ -212,6 +218,13 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
                               "search_best_bic": search_best_bic,
                               "partition_refinement_gain": partition_refinement_gain})
         return result
+
+    report_every = max(1, min(1000, num_iters // 100))
+    def report(step, current, best):
+        if on_progress:
+            on_progress({"iteration": step, "total": num_iters,
+                         "score": float(current), "best_score": float(best)})
+    report(0, bic, bic)
 
 
     if mode == "bic":
@@ -241,6 +254,8 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
             num_fails += fail
             if return_history:
                 bic_history[i + 1] = bic
+            if (i + 1) % report_every == 0 or i + 1 == num_iters:
+                report(i + 1, bic, best_bic)
             if target_bic is not None and best_bic >= target_bic:
                 target_reached = True
                 completed_iters = i + 1
@@ -257,6 +272,7 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
             if refined_bic > best_bic:
                 best_P, best_bic = refined_P, refined_bic
         partition_refinement_gain = best_bic - search_best_bic
+        report(completed_iters, bic, best_bic)
 
         best_A = utils.parent_masks_to_adjacency(best_masks)
         CPDAG_A = utils.getCPDAG(best_A, best_P)
@@ -269,6 +285,8 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
     if mode == "map":
         cashe = defaultdict(lambda: 0)
         num_fails = 0
+
+        chain_best = bic
 
         # Run MCMC iters    
         for i in range(num_iters):
@@ -287,6 +305,9 @@ def CausalMCMC(data, num_iters = None, mode = "bic", move_weights = None, A0 = N
             num_fails += fail
             if return_history:
                 bic_history[i + 1] = bic
+            chain_best = max(chain_best, bic)
+            if (i + 1) % report_every == 0 or i + 1 == num_iters:
+                report(i + 1, bic, chain_best)
         completed_iters = num_iters
 
         # With no transitions, return the initial graph with zero visits.
