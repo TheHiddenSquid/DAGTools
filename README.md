@@ -54,7 +54,11 @@ or `--data-dir /path/to/data` to choose a storage location.
 3. **Run algorithms.** Choose MCMC, greedy graph-and-color search, greedy
    search with an optimal partition, or GES with Gaussian BIC. Settings appear from the Python registry.
    A separate worker executes a frozen snapshot of the inputs. You can keep
-   editing while it runs. Inspect the trace, DAG, or partially directed result,
+   editing while it runs. Starting a run saves the current experiment and attaches
+   the run to its own history; reopening that experiment restores its history.
+   Earlier runs without experiment labels remain under **Earlier unassigned runs**
+   and can be attached with **Add run to this experiment**.
+   Inspect the trace, DAG, or partially directed result,
    then choose **Send to Explore & score** to load the result into the candidate
    editor. **Use as next starting DAG** loads the same candidate while keeping
    you on the algorithm page: choose another algorithm and run it. Both actions
@@ -72,13 +76,26 @@ does not change any existing observations. Every generated/imported dataset is
 immutable. Candidate scores always use that dataset's column mapping.
 
 The entire **Active sample** card opens the selector. Use the trash icon beside
-it to **Manage samples**. Deletion removes a sample from the selector without
-erasing its observations or breaking saved experiments and run records. Deleted
-samples appear in the manager with a **Restore** action; reopening a saved
-experiment or loading a run result restores its sample when needed. A sample
-used by an active run must wait until that run finishes or is stopped. Deleting
-the last sample leaves the editors available, with scoring disabled until a
-sample is generated, imported, or restored.
+it to **Manage samples**. **Hide** removes a sample from the selector while keeping
+its observations and references; **Restore** brings it back. **Delete forever**
+permanently removes the sample and all run records that used it, including result
+and history files. The confirmation lists affected experiments, which keep their
+graphs and settings with no active sample. Exported files remain independent.
+Deleting the last sample leaves the editors available with scoring disabled;
+the demo sample is not recreated on restart.
+
+Each saved experiment card has a trash button. Permanent experiment deletion
+removes its graphs/settings and owned run records/files, while keeping shared
+samples available. Deletion requires an explicit confirmation showing the impact;
+a changed set of affected records requires reviewing it again. An affected active
+run must be stopped before deletion. Local filesystem/database deletions use
+recoverable staging so interrupted deletions can be finished or rolled back on
+restart. These are permanent removals from the app, not forensic disk erasure.
+
+Select a variable to see a solid outer ring and check mark. Other variables in
+the same variance group receive dashed rings and dots, the group is highlighted
+in the legend, and the inspector lists its peers. Clearing the selection clears
+these indicators without changing graph positions or group colors.
 
 ## Random models and graph arrangement
 

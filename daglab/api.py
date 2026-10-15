@@ -1,4 +1,5 @@
 import csv
+import hashlib
 import io
 import json
 import os
@@ -17,7 +18,7 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 from .algorithms import REGISTRY
 from .generation import circular_layout, random_graph, random_partition
 from .jobs import Jobs
-from .models import Column, GenerateRequest, Graph, RunRequest, ScoreRequest, Workspace, RandomGraphRequest, RandomPartitionRequest, demo_graph
+from .models import Column, GenerateRequest, Graph, RunRequest, ScoreRequest, Workspace, DeleteRequest, RunAssignmentRequest, RandomGraphRequest, RandomPartitionRequest, demo_graph
 from .scoring import Scorer, graph_arrays, simulate
 from .storage import Store, now
 
@@ -80,11 +81,12 @@ def create_app(data_dir=None):
     @app.get("/api/bootstrap")
     def bootstrap():
         datasets = store.list("dataset")
-        if not datasets and not store.list("dataset", include_deleted=True):
+        if not datasets and not store.list("setting") and not store.list("dataset", include_deleted=True):
             graph = demo_graph()
             data, columns = simulate(graph, 1000, 42)
             dataset = store.add_dataset(data, columns, "Five-variable demo", {"type": "generated", "seed": 42, "graph": graph.model_dump()})
             datasets = [dataset]
+        store.put("setting", {"id": "demo_initialized"})
         dataset = datasets[0] if datasets else None
         source = (dataset["provenance"].get("graph") if dataset else None) or demo_graph().model_dump()
         source_graph = Graph.model_validate(source)
@@ -142,11 +144,13 @@ def create_app(data_dir=None):
 
     @app.get("/api/datasets/{key}/csv")
     def dataset_csv(key: str):
-        dataset = store.get("dataset", key)
+        with jobs.lock:
+            dataset = store.get("dataset", key)
+            observations = store.load_data(key)
         buffer = io.StringIO()
         writer = csv.writer(buffer)
         writer.writerow([column["label"] for column in dataset["columns"]])
-        writer.writerows(store.load_data(key))
+        writer.writerows(observations)
         return Response(buffer.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="daglab-sample.csv"'})
 
     @app.post("/api/graphs/random")
@@ -163,8 +167,14 @@ def create_app(data_dir=None):
             return get_scorer(request.dataset_id, request.center).score(request.graph, request.optimize_partition)
 
     @app.get("/api/runs")
-    def runs():
-        return jobs.list()
+    def runs(experiment_id: str | None = None, unassigned: bool = False):
+        records = jobs.list()
+        if unassigned:
+            return [r for r in records if not r.get("experiment_id")]
+        if experiment_id is not None:
+            store.get("workspace", experiment_id)
+            return [r for r in records if r.get("experiment_id") == experiment_id]
+        return records
 
     @app.post("/api/runs", status_code=202)
     def run(request: RunRequest):
@@ -173,6 +183,18 @@ def create_app(data_dir=None):
     @app.get("/api/runs/{key}")
     def run_details(key: str):
         return jobs.get(key)
+
+    @app.put("/api/runs/{key}/experiment")
+    def assign_run(key: str, request: RunAssignmentRequest):
+        with jobs.lock:
+            store.get("workspace", request.experiment_id)
+            record = jobs.get(key)
+            if record.get("experiment_id"):
+                raise HTTPException(409, "This run already belongs to an experiment.")
+            if record["status"] == "running":
+                raise HTTPException(409, "Wait for the run to finish before assigning it.")
+            record["experiment_id"] = request.experiment_id
+            return store.put("run", record)
 
     @app.post("/api/runs/{key}/cancel")
     def cancel(key: str):
@@ -194,10 +216,12 @@ def create_app(data_dir=None):
         return store.list("workspace")
 
     def save_workspace(workspace, key):
-        if workspace.dataset_id:
-            dataset = store.get("dataset", workspace.dataset_id)
-            graph_arrays(workspace.candidate_graph, dataset["columns"])
-        return store.put("workspace", {"id": key, "updated_at": now(), "workspace": workspace.model_dump()})
+        with jobs.lock:
+            if workspace.dataset_id:
+                dataset = store.get("dataset", workspace.dataset_id)
+                graph_arrays(workspace.candidate_graph, dataset["columns"])
+            workspace = workspace.model_copy(update={"experiment_id": key})
+            return store.put("workspace", {"id": key, "updated_at": now(), "workspace": workspace.model_dump()})
 
     @app.post("/api/workspaces")
     def save(workspace: Workspace):
@@ -205,14 +229,68 @@ def create_app(data_dir=None):
 
     @app.put("/api/workspaces/{key}")
     def update(key: str, workspace: Workspace):
-        store.get("workspace", key)
-        return save_workspace(workspace, key)
+        with jobs.lock:
+            store.get("workspace", key)
+            return save_workspace(workspace, key)
+
+    def deletion_plan(kind, key):
+        record = store.get(kind, key)
+        runs = jobs.list()
+        affected_runs = [r for r in runs if (r.get("experiment_id") == key if kind == "workspace" else r["request"]["dataset_id"] == key)]
+        references = [w for w in store.list("workspace") if kind == "dataset" and w["workspace"]["dataset_id"] == key]
+        plan = {"id": key, "kind": kind, "name": record["workspace"]["name"] if kind == "workspace" else record["name"],
+                "run_ids": [r["id"] for r in affected_runs], "running": any(r["status"] == "running" for r in affected_runs),
+                "experiments": [{"id": w["id"], "name": w["workspace"]["name"]} for w in references]}
+        plan["token"] = hashlib.sha256(json.dumps(plan, sort_keys=True).encode()).hexdigest()
+        return plan
+
+    @app.get("/api/workspaces/{key}/deletion")
+    def experiment_deletion(key: str):
+        with jobs.lock:
+            return deletion_plan("workspace", key)
+
+    @app.get("/api/datasets/{key}/deletion")
+    def sample_deletion(key: str):
+        with jobs.lock:
+            return deletion_plan("dataset", key)
+
+    @app.delete("/api/workspaces/{key}")
+    def purge_experiment(key: str, request: DeleteRequest):
+        with jobs.lock:
+            plan = deletion_plan("workspace", key)
+            if request.preview_token != plan["token"]:
+                raise HTTPException(409, "The affected records changed. Cancel and review the deletion again.")
+            if plan["running"]:
+                raise HTTPException(409, "Stop the experiment's active run before deleting it.")
+            store.purge([("workspace", key)] + [("run", r) for r in plan["run_ids"]])
+            return plan
+
+    @app.delete("/api/datasets/{key}")
+    def purge_sample(key: str, request: DeleteRequest):
+        with jobs.lock, score_lock:
+            plan = deletion_plan("dataset", key)
+            if request.preview_token != plan["token"]:
+                raise HTTPException(409, "The affected records changed. Cancel and review the deletion again.")
+            if plan["running"]:
+                raise HTTPException(409, "Stop the active run before permanently deleting its sample.")
+            updates = [("setting", {"id": "demo_initialized"})]
+            for reference in plan["experiments"]:
+                record = store.get("workspace", reference["id"])
+                record["workspace"]["dataset_id"] = None
+                record["updated_at"] = now()
+                updates.append(("workspace", record))
+            store.purge([("dataset", key)] + [("run", r) for r in plan["run_ids"]], updates)
+            for cache_key in list(scorers):
+                if cache_key[0] == key:
+                    scorers.pop(cache_key)
+            return plan
 
     @app.post("/api/workspaces/export")
     def export_workspace(workspace: Workspace):
         payload = {"format": "daglab-experiment-v1", "workspace": workspace.model_dump()}
         if workspace.dataset_id:
-            payload["dataset"] = {"metadata": store.get("dataset", workspace.dataset_id), "data": store.load_data(workspace.dataset_id).tolist()}
+            with jobs.lock:
+                payload["dataset"] = {"metadata": store.get("dataset", workspace.dataset_id), "data": store.load_data(workspace.dataset_id).tolist()}
         return JSONResponse(payload, headers={"Content-Disposition": 'attachment; filename="daglab-experiment.json"'})
 
     @app.post("/api/workspaces/import")

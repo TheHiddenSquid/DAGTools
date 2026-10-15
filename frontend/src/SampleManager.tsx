@@ -1,4 +1,4 @@
-import { Database, RotateCcw, Trash2, X } from "lucide-react";
+import { Archive, Database, RotateCcw, Trash2, X } from "lucide-react";
 import type { Dataset } from "./types";
 
 type Props = {
@@ -9,6 +9,7 @@ type Props = {
   onClose: () => void;
   onDelete: (sample: Dataset) => void;
   onRestore: (sample: Dataset) => void;
+  onPurge: (sample: Dataset) => void;
 };
 
 export function SampleManager({
@@ -19,6 +20,7 @@ export function SampleManager({
   onClose,
   onDelete,
   onRestore,
+  onPurge,
 }: Props) {
   const available = samples.filter((sample) => !sample.deleted_at);
   const deleted = samples.filter((sample) => sample.deleted_at);
@@ -45,11 +47,13 @@ export function SampleManager({
         <button
           className={isDeleted ? "secondary" : "sample-delete"}
           disabled={busy || running}
-          aria-label={`${isDeleted ? "Restore" : "Delete"} sample ${sample.name}`}
+          aria-label={`${isDeleted ? "Restore" : "Hide"} sample ${sample.name}`}
           title={
             running
               ? "Stop the active run before deleting its sample"
-              : undefined
+              : isDeleted
+                ? "Restore sample"
+                : "Hide sample from selector"
           }
           onClick={() => (isDeleted ? onRestore(sample) : onDelete(sample))}
         >
@@ -59,8 +63,18 @@ export function SampleManager({
               Restore
             </>
           ) : (
-            <Trash2 size={16} />
+            <Archive size={16} />
           )}
+        </button>
+        <button
+          className="sample-delete"
+          disabled={busy || running}
+          aria-label={`Permanently delete sample ${sample.name}`}
+          title="Permanently delete sample and related runs"
+          onClick={() => onPurge(sample)}
+        >
+          <Trash2 size={16} />
+          <span className="small">Delete forever</span>
         </button>
       </div>
     );
@@ -91,8 +105,8 @@ export function SampleManager({
         <div className="eyebrow">YOUR OBSERVATIONS</div>
         <h2 id="samples-title">Manage samples</h2>
         <p>
-          Delete samples you no longer need in the selector. You can restore
-          them here; saved experiments and run results keep their data.
+          Hide samples from the selector and restore them later, or choose
+          Delete forever to erase their observations and related run records.
         </p>
         <div className="sample-list">
           {available.length ? (
@@ -106,7 +120,7 @@ export function SampleManager({
         </div>
         {deleted.length > 0 && (
           <details className="deleted-samples" open>
-            <summary>Deleted samples ({deleted.length})</summary>
+            <summary>Hidden samples ({deleted.length})</summary>
             {deleted.map(row)}
           </details>
         )}

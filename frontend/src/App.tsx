@@ -28,8 +28,10 @@ import {
 } from "lucide-react";
 import { GraphEditor } from "./GraphEditor";
 import { ScoreChart } from "./ScoreChart";
+import { DeleteDialog } from "./DeleteDialog";
 import { SampleManager } from "./SampleManager";
 import type {
+  DeletionPlan,
   Algorithm,
   Dataset,
   Experiment,
@@ -234,11 +236,14 @@ export default function App() {
     [csvHeader, setCsvHeader] = useState(true);
   const [help, setHelp] = useState(false);
   const [sampleManager, setSampleManager] = useState(false);
+  const [deletion, setDeletion] = useState<DeletionPlan | null>(null);
+  const [legacyHistory, setLegacyHistory] = useState(false);
   const [allSamples, setAllSamples] = useState<Dataset[]>([]);
   const csvInput = useRef<HTMLInputElement>(null),
     experimentInput = useRef<HTMLInputElement>(null);
   const defaultWorkspace = useRef<Workspace | null>(null);
   const ready = useRef(false);
+  const operationInFlight = useRef(false);
   const latestWorkspace = useRef<Workspace | null>(null);
   latestWorkspace.current = workspace;
   const notify = useCallback(
@@ -271,10 +276,20 @@ export default function App() {
   );
   const dataset = datasets.find((d) => d.id === workspace?.dataset_id);
   const algorithm = algorithms.find((a) => a.id === workspace?.algorithm);
-  const currentRun = runs.find((r) => r.id === selectedRun) || runs[0];
+  const experimentRuns = runs.filter(
+    (r) => savedId && r.experiment_id === savedId,
+  );
+  const unassignedRuns = runs.filter((r) => !r.experiment_id);
+  const visibleRuns = legacyHistory ? unassignedRuns : experimentRuns;
+  const currentRun =
+    visibleRuns.find((r) => r.id === selectedRun) || visibleRuns[0];
   const activeRun = runs.find((r) => r.status === "running");
   const dirty = workspace ? JSON.stringify(workspace) !== savedSnapshot : false;
 
+  useEffect(() => {
+    setSelectedRun(null);
+    setLegacyHistory(false);
+  }, [savedId]);
   useEffect(() => {
     let cancelled = false;
     api<Bootstrap>("/bootstrap")
@@ -289,12 +304,20 @@ export default function App() {
           if (
             draft?.schema_version === 1 &&
             draft.candidate_graph?.nodes?.length &&
-            data.datasets.some((d) => d.id === draft.dataset_id)
+            (draft.dataset_id === null ||
+              data.datasets.some((d) => d.id === draft.dataset_id)) &&
+            (!draft.experiment_id ||
+              data.experiments.some((e) => e.id === draft.experiment_id))
           )
             initial = draft;
         } catch {
           /* The server workspace is the fallback for an invalid local draft. */
         }
+        const saved = data.experiments.find(
+          (e) => e.id === initial.experiment_id,
+        );
+        setSavedId(saved?.id ?? null);
+        setSavedSnapshot(saved ? JSON.stringify(saved.workspace) : "");
         setWorkspace(initial);
         setDatasets(data.datasets);
         setAlgorithms(data.algorithms);
@@ -425,12 +448,15 @@ export default function App() {
   }, [activeRun?.id, fail]);
 
   async function action(name: string, operation: () => Promise<void>) {
+    if (operationInFlight.current) return;
+    operationInFlight.current = true;
     setBusy(name);
     try {
       await operation();
     } catch (err) {
       fail((err as Error).message);
     } finally {
+      operationInFlight.current = false;
       setBusy("");
     }
   }
@@ -461,7 +487,7 @@ export default function App() {
         if (remaining.length) activateDataset(remaining[0]);
         else update({ dataset_id: null });
       }
-      notify(`Deleted ${sample.name}. It can be restored in Manage samples.`);
+      notify(`Hidden ${sample.name}. It can be restored in Manage samples.`);
     });
   }
   async function restoreSample(sample: Dataset) {
@@ -529,17 +555,91 @@ export default function App() {
       notify(`Imported ${next.name}.`);
     });
   }
+  async function persistExperiment(snapshot: Workspace) {
+    const record = await api<Experiment>(
+      savedId ? `/workspaces/${savedId}` : "/workspaces",
+      { method: savedId ? "PUT" : "POST", body: JSON.stringify(snapshot) },
+    );
+    setSavedId(record.id);
+    setWorkspace((current) =>
+      current ? { ...current, experiment_id: record.id } : current,
+    );
+    setSavedSnapshot(JSON.stringify(record.workspace));
+    setExperiments((es) => [record, ...es.filter((e) => e.id !== record.id)]);
+    return record;
+  }
   async function save() {
     if (!workspace) return;
     await action("save", async () => {
-      const record = await api<Experiment>(
-        savedId ? `/workspaces/${savedId}` : "/workspaces",
-        { method: savedId ? "PUT" : "POST", body: JSON.stringify(workspace) },
-      );
-      setSavedId(record.id);
-      setSavedSnapshot(JSON.stringify(workspace));
-      setExperiments((es) => [record, ...es.filter((e) => e.id !== record.id)]);
+      await persistExperiment(workspace);
       notify("Experiment saved on this computer.");
+    });
+  }
+  async function prepareDeletion(kind: "workspace" | "dataset", id: string) {
+    await action("prepareDelete", async () => {
+      const plan = await api<DeletionPlan>(
+        `/${kind === "workspace" ? "workspaces" : "datasets"}/${id}/deletion`,
+      );
+      setDeletion(plan);
+    });
+  }
+  async function permanentlyDelete() {
+    if (!deletion) return;
+    await action("purge", async () => {
+      await api(
+        `/${deletion.kind === "workspace" ? "workspaces" : "datasets"}/${deletion.id}`,
+        {
+          method: "DELETE",
+          body: JSON.stringify({ preview_token: deletion.token }),
+        },
+      );
+      const [nextExperiments, nextRuns, samples] = await Promise.all([
+        api<Experiment[]>("/workspaces"),
+        api<Run[]>("/runs"),
+        api<Dataset[]>("/datasets?include_deleted=true"),
+      ]);
+      setExperiments(nextExperiments);
+      setRuns(nextRuns);
+      setAllSamples(samples);
+      setDatasets(samples.filter((s) => !s.deleted_at));
+      if (deletion.kind === "workspace" && savedId === deletion.id) {
+        const next = clone(defaultWorkspace.current!);
+        next.dataset_id = samples.find((s) => !s.deleted_at)?.id ?? null;
+        next.candidate_graph = next.dataset_id
+          ? emptyGraph(samples.find((s) => s.id === next.dataset_id)!)
+          : { ...clone(next.source_graph), edges: [] };
+        next.experiment_id = null;
+        setWorkspace(next);
+        setSavedId(null);
+        setSavedSnapshot("");
+        setSelectedRun(null);
+        setLegacyHistory(false);
+      } else if (
+        deletion.kind === "dataset" &&
+        latestWorkspace.current?.dataset_id === deletion.id
+      ) {
+        setWorkspace((current) =>
+          current ? { ...current, dataset_id: null } : current,
+        );
+      }
+      setDeletion(null);
+      notify(
+        `Permanently deleted ${deletion.name}${deletion.run_ids.length ? ` and ${deletion.run_ids.length} run records` : ""}.`,
+      );
+    });
+  }
+  async function assignLegacyRun(run: Run) {
+    if (!workspace) return;
+    await action("assignRun", async () => {
+      const record = await persistExperiment(workspace);
+      const assigned = await api<Run>(`/runs/${run.id}/experiment`, {
+        method: "PUT",
+        body: JSON.stringify({ experiment_id: record.id }),
+      });
+      setRuns((rs) => rs.map((r) => (r.id === assigned.id ? assigned : r)));
+      setLegacyHistory(false);
+      setSelectedRun(assigned.id);
+      notify("Run added to this experiment's history.");
     });
   }
   async function exportWorkspace() {
@@ -573,6 +673,8 @@ export default function App() {
   async function applyExperiment(record: Experiment) {
     if (record.workspace.dataset_id)
       await ensureSample(record.workspace.dataset_id);
+    setSelectedRun(null);
+    setLegacyHistory(false);
     setWorkspace(clone(record.workspace));
     setSavedId(record.id);
     setSavedSnapshot(JSON.stringify(record.workspace));
@@ -641,15 +743,18 @@ export default function App() {
   async function startRun() {
     if (!workspace) return;
     await action("run", async () => {
+      const record = await persistExperiment(workspace);
       const run = await api<Run>("/runs", {
         method: "POST",
         body: JSON.stringify({
+          experiment_id: record.id,
           dataset_id: workspace.dataset_id,
           graph: workspace.candidate_graph,
           algorithm: workspace.algorithm,
           settings: { ...workspace.settings, center: workspace.center },
         }),
       });
+      setLegacyHistory(false);
       setRuns((rs) => [run, ...rs]);
       setSelectedRun(run.id);
       setResultView("dag");
@@ -1305,6 +1410,42 @@ export default function App() {
                 )}
               </aside>
               <div className="run-results">
+                <div className="history-scope">
+                  <label>
+                    Run history
+                    <select
+                      aria-label="Run history scope"
+                      value={legacyHistory ? "legacy" : "experiment"}
+                      onChange={(e) => {
+                        setLegacyHistory(e.target.value === "legacy");
+                        setSelectedRun(null);
+                      }}
+                    >
+                      <option value="experiment">
+                        {workspace.name} · {experimentRuns.length} runs
+                      </option>
+                      {unassignedRuns.length > 0 && (
+                        <option value="legacy">
+                          Earlier unassigned runs · {unassignedRuns.length}
+                        </option>
+                      )}
+                    </select>
+                  </label>
+                  <p className="muted small">
+                    {legacyHistory
+                      ? "Earlier runs have no experiment label. Select one to add it to this experiment."
+                      : "Runs stay with this experiment, including after reopening it. Starting a run saves the experiment first."}
+                  </p>
+                </div>
+                {activeRun && activeRun.experiment_id !== savedId && (
+                  <p className="info-box">
+                    A search is running in{" "}
+                    {experiments.find((e) => e.id === activeRun.experiment_id)
+                      ?.workspace.name || "earlier unassigned runs"}
+                    . Stop it or wait before starting another.
+                  </p>
+                )}
+
                 {!currentRun ? (
                   <section className="empty-results">
                     <div className="empty-orbit">
@@ -1315,8 +1456,9 @@ export default function App() {
                     <span className="eyebrow">FROM DATA TO STRUCTURE</span>
                     <h2>Your next discovery starts here</h2>
                     <p>
-                      Choose an algorithm and its settings. The search runs
-                      separately, so you can continue exploring while it works.
+                      This experiment has no runs yet. Choose an algorithm and
+                      its settings. The search runs separately, so you can
+                      continue exploring while it works.
                     </p>
                     <div className="empty-steps">
                       <span>
@@ -1475,6 +1617,15 @@ export default function App() {
                               : "search steps"
                         }
                       />
+                      {legacyHistory && currentRun.status !== "running" && (
+                        <button
+                          className="secondary"
+                          disabled={!!busy}
+                          onClick={() => void assignLegacyRun(currentRun)}
+                        >
+                          Add run to this experiment
+                        </button>
+                      )}
                       {result && (
                         <div className="result-actions">
                           <button
@@ -1556,10 +1707,12 @@ export default function App() {
                         <div className="section-heading">
                           <h2>Run history</h2>
                           <span className="muted small">
-                            Inputs are saved with every run
+                            {legacyHistory
+                              ? "Earlier unassigned runs"
+                              : workspace.name}
                           </span>
                         </div>
-                        {runs.map((run) => (
+                        {visibleRuns.map((run) => (
                           <button
                             key={run.id}
                             className={`history-row ${currentRun.id === run.id ? "selected" : ""}`}
@@ -1614,9 +1767,11 @@ export default function App() {
                   </button>
                   <button
                     className="primary"
+                    disabled={!!busy}
                     onClick={() => {
                       if (defaultWorkspace.current) {
                         const next = clone(defaultWorkspace.current);
+                        next.experiment_id = null;
                         const sample = dataset || datasets[0];
                         next.dataset_id = sample?.id ?? null;
                         next.candidate_graph = sample
@@ -1624,6 +1779,8 @@ export default function App() {
                           : { ...clone(next.source_graph), edges: [] };
                         setWorkspace(next);
                         setSavedId(null);
+                        setSelectedRun(null);
+                        setLegacyHistory(false);
                         setSavedSnapshot("");
                         setPage("data");
                       }
@@ -1637,27 +1794,46 @@ export default function App() {
               {experiments.length ? (
                 <div className="experiment-grid">
                   {experiments.map((experiment) => (
-                    <button
-                      key={experiment.id}
-                      className="experiment-card"
-                      onClick={() => openExperiment(experiment)}
-                    >
-                      <div className="experiment-icon">
-                        <GitBranch size={22} />
-                        <ArrowUpRight size={17} />
-                      </div>
-                      <h3>{experiment.workspace.name}</h3>
-                      <p>
-                        {experiment.workspace.candidate_graph.nodes.length}{" "}
-                        variables ·{" "}
-                        {experiment.workspace.candidate_graph.edges.length}{" "}
-                        candidate edges
-                      </p>
-                      <div>
-                        <span>{dateLabel(experiment.updated_at)}</span>
-                        <ChevronRight size={15} />
-                      </div>
-                    </button>
+                    <div key={experiment.id} className="experiment-tile">
+                      <button
+                        className="experiment-card"
+                        disabled={!!busy}
+                        onClick={() => openExperiment(experiment)}
+                      >
+                        <div className="experiment-icon">
+                          <GitBranch size={22} />
+                          <ArrowUpRight size={17} />
+                        </div>
+                        <h3>{experiment.workspace.name}</h3>
+                        <p>
+                          {experiment.workspace.candidate_graph.nodes.length}{" "}
+                          variables ·{" "}
+                          {experiment.workspace.candidate_graph.edges.length}{" "}
+                          candidate edges ·{" "}
+                          {
+                            runs.filter(
+                              (r) => r.experiment_id === experiment.id,
+                            ).length
+                          }{" "}
+                          runs
+                        </p>
+                        <div>
+                          <span>{dateLabel(experiment.updated_at)}</span>
+                          <ChevronRight size={15} />
+                        </div>
+                      </button>
+                      <button
+                        className="experiment-delete"
+                        aria-label={`Permanently delete experiment ${experiment.workspace.name}`}
+                        title="Permanently delete experiment"
+                        disabled={!!busy}
+                        onClick={() =>
+                          void prepareDeletion("workspace", experiment.id)
+                        }
+                      >
+                        <Trash2 size={16} />
+                      </button>
+                    </div>
                   ))}
                 </div>
               ) : (
@@ -1790,7 +1966,15 @@ export default function App() {
           </section>
         </div>
       )}
-      {sampleManager && (
+      {deletion && (
+        <DeleteDialog
+          plan={deletion}
+          busy={!!busy}
+          onCancel={() => setDeletion(null)}
+          onConfirm={() => void permanentlyDelete()}
+        />
+      )}
+      {sampleManager && !deletion && (
         <SampleManager
           samples={allSamples}
           activeId={workspace.dataset_id}
@@ -1799,6 +1983,7 @@ export default function App() {
           onClose={() => setSampleManager(false)}
           onDelete={(sample) => void deleteSample(sample)}
           onRestore={(sample) => void restoreSample(sample)}
+          onPurge={(sample) => void prepareDeletion("dataset", sample.id)}
         />
       )}
     </div>

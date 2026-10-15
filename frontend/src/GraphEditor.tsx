@@ -50,7 +50,7 @@ import { RandomGraphMenu } from "./RandomGraphMenu";
 import { circleSegment } from "./edgeGeometry";
 
 type VariableFlowNode = FlowNode<
-  { label: string; group: string; color: string },
+  { label: string; group: string; color: string; sameGroup: boolean },
   "variable"
 >;
 const VariableNode = memo(function VariableNode({
@@ -59,9 +59,22 @@ const VariableNode = memo(function VariableNode({
 }: NodeProps<VariableFlowNode>) {
   return (
     <div
-      className={`variable-node ${selected ? "is-selected" : ""}`}
+      className={`variable-node ${selected ? "is-selected" : data.sameGroup ? "is-group-peer" : ""}`}
       style={{ "--node-color": data.color } as React.CSSProperties}
     >
+      {(selected || data.sameGroup) && (
+        <span
+          className={`node-selection-badge ${selected ? "selected-badge" : ""}`}
+          title={
+            selected
+              ? "Selected variable"
+              : "Same variance group as selected variable"
+          }
+          aria-label={selected ? "Selected variable" : "Same variance group"}
+        >
+          {selected ? "✓" : "●"}
+        </span>
+      )}
       <Handle type="target" position={Position.Left} />
       <span title={data.label}>
         <strong>{data.label}</strong>
@@ -188,9 +201,10 @@ function Editor({
           label: n.label,
           group: n.group,
           color: groupColor(n.group, groups),
+          sameGroup: !!node && n.id !== node.id && n.group === node.group,
         },
       })),
-    [graph.nodes, selected, source, groups],
+    [graph.nodes, selected, source, groups, node],
   );
   const [nodes, setNodes] = useState<VariableFlowNode[]>(modelNodes);
   useLayoutEffect(() => {
@@ -271,7 +285,7 @@ function Editor({
         current,
       ),
     );
-    const positions = changes.filter(c => c.type === "position");
+    const positions = changes.filter((c) => c.type === "position");
     if (!readOnly && !dragStart.current && positions.length) {
       // Keyboard arrow moves do not emit pointer drag callbacks.
       commit({
@@ -488,7 +502,10 @@ function Editor({
         <div className="canvas-legend">
           <span className="legend-label">VARIANCE GROUPS</span>
           {groups.map((g) => (
-            <span key={g}>
+            <span
+              key={g}
+              className={node?.group === g ? "selected-group-label" : ""}
+            >
               <i style={{ background: groupColor(g, groups) }} />
               Group {g}
             </span>
@@ -614,6 +631,15 @@ function Editor({
                   <small>Shared by every node in group {node.group}.</small>
                 </label>
               )}
+              <div className="detail-row">
+                <span>Same variance group</span>
+                <strong>
+                  {graph.nodes
+                    .filter((n) => n.group === node.group && n.id !== node.id)
+                    .map((n) => n.label)
+                    .join(", ") || "No other variables"}
+                </strong>
+              </div>
               <div className="detail-row">
                 <span>Parents</span>
                 <strong>

@@ -5,6 +5,7 @@ import io
 import itertools
 import json
 import sqlite3
+import shutil
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -25,6 +26,60 @@ class Store:
         with self.connect() as db:
             db.execute("CREATE TABLE IF NOT EXISTS records (kind TEXT, id TEXT, payload TEXT, PRIMARY KEY(kind,id))")
 
+        self._recover_purges()
+        if self.list("dataset", include_deleted=True):
+            self.put("setting", {"id": "demo_initialized"})
+
+    def _recover_purges(self):
+        # Renames plus a manifest keep a crash between filesystem and database
+        # updates recoverable. Committed deletions are erased; others restored.
+        folder = self.root / ".purging"
+        if not folder.exists():
+            return
+        for stage in folder.iterdir():
+            if not (stage / "manifest.json").exists():
+                shutil.rmtree(stage)
+                continue
+            manifest = json.loads((stage / "manifest.json").read_text())
+            for kind, key in manifest:
+                staged = stage / f"{kind}-{key}"
+                original = self.root / ("datasets" if kind == "dataset" else "runs") / (f"{key}.npy" if kind == "dataset" else key)
+                try:
+                    self.get(kind, key)
+                    exists = True
+                except KeyError:
+                    exists = False
+                if exists and staged.exists() and not original.exists():
+                    staged.rename(original)
+            shutil.rmtree(stage)
+
+    def purge(self, records, updates=()):
+        """Atomically remove metadata and detach references, then erase files."""
+        stage = self.root / ".purging" / uuid.uuid4().hex
+        stage.mkdir(parents=True)
+        file_records = [(kind, key) for kind, key in records if kind in ("dataset", "run")]
+        for _, key in file_records:
+            if Path(key).name != key or key in (".", ".."):
+                raise ValueError("Invalid record identifier.")
+        (stage / "manifest.json").write_text(json.dumps(file_records))
+        try:
+            for kind, key in file_records:
+                original = self.root / ("datasets" if kind == "dataset" else "runs") / (f"{key}.npy" if kind == "dataset" else key)
+                if original.exists():
+                    original.rename(stage / f"{kind}-{key}")
+            with self.connect() as db:
+                for kind, key in records:
+                    db.execute("DELETE FROM records WHERE kind=? AND id=?", (kind, key))
+                for kind, record in updates:
+                    db.execute("INSERT OR REPLACE INTO records VALUES (?,?,?)", (kind, record["id"], json.dumps(record, allow_nan=False)))
+        except Exception:
+            self._recover_purges()
+            raise
+        try:
+            shutil.rmtree(stage)
+        except OSError as exc:
+            raise ValueError("Records were removed, but some files could not be erased. Restart the app to retry cleanup.") from exc
+
     def connect(self):
         return sqlite3.connect(self.db, timeout=20)
 
@@ -38,12 +93,18 @@ class Store:
             row = db.execute("SELECT payload FROM records WHERE kind=? AND id=?", (kind, key)).fetchone()
         if row is None:
             raise KeyError(f"{kind.capitalize()} not found.")
-        return json.loads(row[0])
+        record = json.loads(row[0])
+        if kind == "workspace":
+            record["workspace"]["experiment_id"] = record["id"]
+        return record
 
     def list(self, kind, include_deleted=False):
         with self.connect() as db:
             rows = db.execute("SELECT payload FROM records WHERE kind=? ORDER BY rowid DESC", (kind,)).fetchall()
         records = [json.loads(row[0]) for row in rows]
+        if kind == "workspace":
+            for record in records:
+                record["workspace"]["experiment_id"] = record["id"]
         if kind == "dataset" and not include_deleted:
             records = [record for record in records if not record.get("deleted_at")]
         return records

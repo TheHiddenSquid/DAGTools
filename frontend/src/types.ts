@@ -47,6 +47,7 @@ export type Settings = {
   ges_iterate: boolean;
 };
 export type Workspace = {
+  experiment_id?: string | null;
   schema_version: 1;
   name: string;
   dataset_id: string | null;
@@ -87,6 +88,7 @@ export type Progress = {
   trace: TracePoint[];
 };
 export type Run = {
+  experiment_id?: string | null;
   id: string;
   name: string;
   status: string;
@@ -197,3 +199,13 @@ export function download(payload: unknown, name: string) {
   a.click();
   URL.revokeObjectURL(url);
 }
+
+export type DeletionPlan = {
+  id: string;
+  kind: "workspace" | "dataset";
+  name: string;
+  run_ids: string[];
+  running: boolean;
+  experiments: { id: string; name: string }[];
+  token: string;
+};

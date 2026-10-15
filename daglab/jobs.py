@@ -23,16 +23,18 @@ class Jobs:
                 self.store.put("run", record)
 
     def start(self, request: RunRequest):
-        validate_settings(request.algorithm, request.settings)
-        dataset = self.store.get("dataset", request.dataset_id)
-        graph_arrays(request.graph, dataset["columns"])
-        data = self.store.load_data(dataset["id"])
-        if data.shape[0] <= data.shape[1]:
-            raise ValueError("Algorithm runs currently require more observations than variables.")
-        Scorer(data, dataset["columns"], request.settings.center).score(request.graph)
         with self.lock:
+            validate_settings(request.algorithm, request.settings)
+            dataset = self.store.get("dataset", request.dataset_id)
+            graph_arrays(request.graph, dataset["columns"])
+            data = self.store.load_data(dataset["id"])
+            if data.shape[0] <= data.shape[1]:
+                raise ValueError("Algorithm runs currently require more observations than variables.")
+            Scorer(data, dataset["columns"], request.settings.center).score(request.graph)
             if self.store.get("dataset", request.dataset_id).get("deleted_at"):
                 raise ValueError("Restore this sample before starting a new run.")
+            if request.experiment_id:
+                self.store.get("workspace", request.experiment_id)
             self.list()
             if any(process.poll() is None for process in self.processes.values()):
                 raise ValueError("One run is already active. Stop it or wait for it to finish.")
@@ -51,7 +53,7 @@ class Jobs:
             root = os.path.dirname(os.path.dirname(__file__))
             revision = subprocess.run(["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True).stdout.strip() or "unknown"
             dirty = bool(subprocess.run(["git", "status", "--porcelain"], cwd=root, capture_output=True, text=True).stdout.strip())
-            record = {"id": key, "name": REGISTRY[request.algorithm]["name"], "status": "running",
+            record = {"id": key, "experiment_id": request.experiment_id, "name": REGISTRY[request.algorithm]["name"], "status": "running",
                       "created_at": now(), "request": snapshot,
                       "dataset": {field: dataset[field] for field in ("id", "name", "columns", "n", "p", "sha256")},
                       "provenance": {"dataset_sha256": dataset["sha256"], "code_revision": revision, "working_tree_modified": dirty, "app_version": "0.1.0"}}

@@ -134,7 +134,16 @@ class RunSettings(Model):
     ges_iterate: bool = False
 
 
+class DeleteRequest(Model):
+    preview_token: str = Field(min_length=64, max_length=64)
+
+
+class RunAssignmentRequest(Model):
+    experiment_id: str = Field(min_length=1, max_length=80)
+
+
 class RunRequest(Model):
+    experiment_id: str | None = Field(default=None, min_length=1, max_length=80)
     dataset_id: str
     graph: Graph
     algorithm: str
@@ -142,6 +151,7 @@ class RunRequest(Model):
 
 
 class Workspace(Model):
+    experiment_id: str | None = Field(default=None, min_length=1, max_length=80)
     schema_version: Literal[1] = 1
     name: str = Field(default="Untitled experiment", min_length=1, max_length=120)
     dataset_id: str | None = None
