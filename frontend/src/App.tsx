@@ -1390,15 +1390,6 @@ export default function App() {
                 )}
               </aside>
               <div className="run-results">
-                <div className="history-scope">
-                  <strong>
-                    Run history · {workspace.name} · {experimentRuns.length} runs
-                  </strong>
-                  <p className="muted small">
-                    Runs stay with this experiment, including after reopening it.
-                    Starting a run saves the experiment first.
-                  </p>
-                </div>
                 {activeRun && activeRun.experiment_id !== savedId && (
                   <p className="info-box">
                     A search is running in{" "}
@@ -1655,46 +1646,48 @@ export default function App() {
                         </p>
                       </>
                     )}
-                    {visibleRuns.length > 0 && (
-                      <section className="run-history">
-                        <div className="section-heading">
-                          <h2>Run history</h2>
-                          <span className="muted small">
-                            {workspace.name}
-                          </span>
-                        </div>
-                        {visibleRuns.map((run) => (
-                          <button
-                            key={run.id}
-                            className={`history-row ${currentRun.id === run.id ? "selected" : ""}`}
-                            onClick={() => {
-                              setSelectedRun(run.id);
-                              setResultView("dag");
-                            }}
-                          >
-                            <span className="history-icon">
-                              <Activity size={16} />
-                            </span>
-                            <span>
-                              <strong>{run.name}</strong>
-                              <small>
-                                {dateLabel(run.created_at)} · seed{" "}
-                                {run.request.settings.seed}
-                              </small>
-                            </span>
-                            <span className={`history-state ${run.status}`}>
-                              {run.status}
-                            </span>
-                            <strong className="history-score">
-                              {formatScore(run.result?.score)}
-                            </strong>
-                            <ChevronRight size={14} />
-                          </button>
-                        ))}
-                      </section>
-                    )}
                   </>
                 )}
+                <section className="run-history">
+                  <div className="section-heading">
+                    <h2>Run history</h2>
+                    <span className="muted small">
+                      {workspace.name} · {visibleRuns.length} runs
+                    </span>
+                  </div>
+                  <p className="muted small history-description">
+                    Runs stay with this experiment, including after reopening it.
+                    Starting a run saves the experiment first.
+                  </p>
+                  {visibleRuns.map((run) => (
+                    <button
+                      key={run.id}
+                      className={`history-row ${currentRun?.id === run.id ? "selected" : ""}`}
+                      onClick={() => {
+                        setSelectedRun(run.id);
+                        setResultView("dag");
+                      }}
+                    >
+                      <span className="history-icon">
+                        <Activity size={16} />
+                      </span>
+                      <span>
+                        <strong>{run.name}</strong>
+                        <small>
+                          {dateLabel(run.created_at)} · seed{" "}
+                          {run.request.settings.seed}
+                        </small>
+                      </span>
+                      <span className={`history-state ${run.status}`}>
+                        {run.status}
+                      </span>
+                      <strong className="history-score">
+                        {formatScore(run.result?.score)}
+                      </strong>
+                      <ChevronRight size={14} />
+                    </button>
+                  ))}
+                </section>
               </div>
             </div>
           )}

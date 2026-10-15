@@ -1477,6 +1477,10 @@ tbody tr:last-child td {
 .run-history .section-heading > .muted {
   font-size: 8px;
 }
+.run-history .history-description {
+  margin: 0;
+  padding: 0 17px 17px;
+}
 .history-row {
   width: 100%;
   padding: 14px 17px;
@@ -2639,19 +2643,6 @@ tbody tr:last-child td {
   font-weight: 700;
   text-decoration: underline;
   text-underline-offset: 4px;
-}
-.history-scope {
-  background: white;
-  padding: 16px 20px;
-  border: 1px solid #e1e7dc;
-  border-radius: 10px;
-  margin-bottom: 18px;
-}
-.history-scope label {
-  margin: 0;
-}
-.history-scope p {
-  margin: 8px 0 0;
 }
 .experiment-tile {
   position: relative;
