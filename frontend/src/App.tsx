@@ -237,7 +237,6 @@ export default function App() {
   const [help, setHelp] = useState(false);
   const [sampleManager, setSampleManager] = useState(false);
   const [deletion, setDeletion] = useState<DeletionPlan | null>(null);
-  const [legacyHistory, setLegacyHistory] = useState(false);
   const [allSamples, setAllSamples] = useState<Dataset[]>([]);
   const csvInput = useRef<HTMLInputElement>(null),
     experimentInput = useRef<HTMLInputElement>(null);
@@ -279,8 +278,7 @@ export default function App() {
   const experimentRuns = runs.filter(
     (r) => savedId && r.experiment_id === savedId,
   );
-  const unassignedRuns = runs.filter((r) => !r.experiment_id);
-  const visibleRuns = legacyHistory ? unassignedRuns : experimentRuns;
+  const visibleRuns = experimentRuns;
   const currentRun =
     visibleRuns.find((r) => r.id === selectedRun) || visibleRuns[0];
   const activeRun = runs.find((r) => r.status === "running");
@@ -288,7 +286,6 @@ export default function App() {
 
   useEffect(() => {
     setSelectedRun(null);
-    setLegacyHistory(false);
   }, [savedId]);
   useEffect(() => {
     let cancelled = false;
@@ -613,7 +610,6 @@ export default function App() {
         setSavedId(null);
         setSavedSnapshot("");
         setSelectedRun(null);
-        setLegacyHistory(false);
       } else if (
         deletion.kind === "dataset" &&
         latestWorkspace.current?.dataset_id === deletion.id
@@ -626,20 +622,6 @@ export default function App() {
       notify(
         `Permanently deleted ${deletion.name}${deletion.run_ids.length ? ` and ${deletion.run_ids.length} run records` : ""}.`,
       );
-    });
-  }
-  async function assignLegacyRun(run: Run) {
-    if (!workspace) return;
-    await action("assignRun", async () => {
-      const record = await persistExperiment(workspace);
-      const assigned = await api<Run>(`/runs/${run.id}/experiment`, {
-        method: "PUT",
-        body: JSON.stringify({ experiment_id: record.id }),
-      });
-      setRuns((rs) => rs.map((r) => (r.id === assigned.id ? assigned : r)));
-      setLegacyHistory(false);
-      setSelectedRun(assigned.id);
-      notify("Run added to this experiment's history.");
     });
   }
   async function exportWorkspace() {
@@ -674,7 +656,6 @@ export default function App() {
     if (record.workspace.dataset_id)
       await ensureSample(record.workspace.dataset_id);
     setSelectedRun(null);
-    setLegacyHistory(false);
     setWorkspace(clone(record.workspace));
     setSavedId(record.id);
     setSavedSnapshot(JSON.stringify(record.workspace));
@@ -754,7 +735,6 @@ export default function App() {
           settings: { ...workspace.settings, center: workspace.center },
         }),
       });
-      setLegacyHistory(false);
       setRuns((rs) => [run, ...rs]);
       setSelectedRun(run.id);
       setResultView("dag");
@@ -1411,37 +1391,19 @@ export default function App() {
               </aside>
               <div className="run-results">
                 <div className="history-scope">
-                  <label>
-                    Run history
-                    <select
-                      aria-label="Run history scope"
-                      value={legacyHistory ? "legacy" : "experiment"}
-                      onChange={(e) => {
-                        setLegacyHistory(e.target.value === "legacy");
-                        setSelectedRun(null);
-                      }}
-                    >
-                      <option value="experiment">
-                        {workspace.name} · {experimentRuns.length} runs
-                      </option>
-                      {unassignedRuns.length > 0 && (
-                        <option value="legacy">
-                          Earlier unassigned runs · {unassignedRuns.length}
-                        </option>
-                      )}
-                    </select>
-                  </label>
+                  <strong>
+                    Run history · {workspace.name} · {experimentRuns.length} runs
+                  </strong>
                   <p className="muted small">
-                    {legacyHistory
-                      ? "Earlier runs have no experiment label. Select one to add it to this experiment."
-                      : "Runs stay with this experiment, including after reopening it. Starting a run saves the experiment first."}
+                    Runs stay with this experiment, including after reopening it.
+                    Starting a run saves the experiment first.
                   </p>
                 </div>
                 {activeRun && activeRun.experiment_id !== savedId && (
                   <p className="info-box">
                     A search is running in{" "}
                     {experiments.find((e) => e.id === activeRun.experiment_id)
-                      ?.workspace.name || "earlier unassigned runs"}
+                      ?.workspace.name || "another experiment"}
                     . Stop it or wait before starting another.
                   </p>
                 )}
@@ -1617,15 +1579,6 @@ export default function App() {
                               : "search steps"
                         }
                       />
-                      {legacyHistory && currentRun.status !== "running" && (
-                        <button
-                          className="secondary"
-                          disabled={!!busy}
-                          onClick={() => void assignLegacyRun(currentRun)}
-                        >
-                          Add run to this experiment
-                        </button>
-                      )}
                       {result && (
                         <div className="result-actions">
                           <button
@@ -1702,14 +1655,12 @@ export default function App() {
                         </p>
                       </>
                     )}
-                    {runs.length > 0 && (
+                    {visibleRuns.length > 0 && (
                       <section className="run-history">
                         <div className="section-heading">
                           <h2>Run history</h2>
                           <span className="muted small">
-                            {legacyHistory
-                              ? "Earlier unassigned runs"
-                              : workspace.name}
+                            {workspace.name}
                           </span>
                         </div>
                         {visibleRuns.map((run) => (
@@ -1780,7 +1731,6 @@ export default function App() {
                         setWorkspace(next);
                         setSavedId(null);
                         setSelectedRun(null);
-                        setLegacyHistory(false);
                         setSavedSnapshot("");
                         setPage("data");
                       }

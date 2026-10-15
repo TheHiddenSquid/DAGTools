@@ -56,8 +56,6 @@ or `--data-dir /path/to/data` to choose a storage location.
    A separate worker executes a frozen snapshot of the inputs. You can keep
    editing while it runs. Starting a run saves the current experiment and attaches
    the run to its own history; reopening that experiment restores its history.
-   Earlier runs without experiment labels remain under **Earlier unassigned runs**
-   and can be attached with **Add run to this experiment**.
    Inspect the trace, DAG, or partially directed result,
    then choose **Send to Explore & score** to load the result into the candidate
    editor. **Use as next starting DAG** loads the same candidate while keeping
