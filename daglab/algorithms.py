@@ -18,7 +18,8 @@ def field(name, label, kind, **kwargs):
 COMMON = [
     field("seed", "Random seed", "number", min=0, max=2**32-1, step=1),
     field("center", "Center sample columns", "boolean", hint="Subtract column means; do not standardize."),
-    field("start_from_candidate", "Start from candidate DAG", "boolean"),
+    field("start_from_candidate", "Use DAG from Explore & score", "boolean",
+          hint="Uses the current candidate graph. Greedy searches seed their first restart with it."),
 ]
 MOVES = [{"value": value, "label": label} for value, label in [
     ("add_edge", "Add edge"), ("remove_edge", "Remove edge"),

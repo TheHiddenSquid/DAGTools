@@ -41,7 +41,8 @@ or `--data-dir /path/to/data` to choose a storage location.
 
 1. **Create data.** Edit the generating DAG. Select nodes to rename them, assign
    variance groups, and set each group's noise variance. Select edges to edit
-   coefficients or reverse/delete them. Add edges by dragging between ports or
+   coefficients or reverse/delete them. Nodes are circles shaded by variance
+   group; straight arrows meet their boundaries in any direction. Add edges by dragging between ports or
    using the selected node's **Connect to** control. Generate a sample with an
    explicit size and seed, or import a UTF-8 CSV with an optional header row.
 2. **Explore & score.** Edit a separate candidate graph on the active sample's
@@ -53,7 +54,12 @@ or `--data-dir /path/to/data` to choose a storage location.
    search with an optimal partition. Settings appear from the Python registry.
    A separate worker executes a frozen snapshot of the inputs. You can keep
    editing while it runs. Inspect the trace, DAG, or partially directed result,
-   then copy a result into the candidate editor.
+   then choose **Send to Explore & score** to load the result into the candidate
+   editor. **Use as next starting DAG** loads the same candidate while keeping
+   you on the algorithm page: choose another algorithm and run it. Both actions
+   select (or restore) the result's sample and enable **Use DAG from Explore &
+   score**. The starting-DAG summary shows the current graph's size. MCMC starts
+   from that graph; greedy searches use it for their first restart.
 4. **Save.** Save named experiments locally. Export experiment JSON includes
    the observations, both graphs, and settings; it can be imported on another
    computer. Run JSON preserves the run inputs, diagnostics, score trace,
@@ -63,6 +69,15 @@ or `--data-dir /path/to/data` to choose a storage location.
 The initial five-variable demo is generated locally. Editing a generating graph
 does not change any existing observations. Every generated/imported dataset is
 immutable. Candidate scores always use that dataset's column mapping.
+
+The entire **Active sample** card opens the selector. Use the trash icon beside
+it to **Manage samples**. Deletion removes a sample from the selector without
+erasing its observations or breaking saved experiments and run records. Deleted
+samples appear in the manager with a **Restore** action; reopening a saved
+experiment or loading a run result restores its sample when needed. A sample
+used by an active run must wait until that run finishes or is stopped. Deleting
+the last sample leaves the editors available, with scoring disabled until a
+sample is generated, imported, or restored.
 
 ## Score and statistical conventions
 
@@ -188,6 +203,7 @@ For UI development, run the Python server on port 8765 and `npm run dev` in
 ```sh
 .venv/bin/python -m pytest -q
 cd frontend && npm run build
+npm run test:geometry
 ```
 
 The Gibbs implementation and other repository sections are not integrated in

@@ -40,10 +40,22 @@ class Store:
             raise KeyError(f"{kind.capitalize()} not found.")
         return json.loads(row[0])
 
-    def list(self, kind):
+    def list(self, kind, include_deleted=False):
         with self.connect() as db:
             rows = db.execute("SELECT payload FROM records WHERE kind=? ORDER BY rowid DESC", (kind,)).fetchall()
-        return [json.loads(row[0]) for row in rows]
+        records = [json.loads(row[0]) for row in rows]
+        if kind == "dataset" and not include_deleted:
+            records = [record for record in records if not record.get("deleted_at")]
+        return records
+
+    def set_dataset_deleted(self, key, deleted):
+        """Retain observations and references so deletion is reversible."""
+        record = self.get("dataset", key)
+        if deleted:
+            record.setdefault("deleted_at", now())
+        else:
+            record.pop("deleted_at", None)
+        return self.put("dataset", record)
 
     def add_dataset(self, data, columns, name, provenance):
         data = np.asarray(data, dtype=np.float64)

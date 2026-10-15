@@ -17,6 +17,7 @@ export type Graph = {
   variances: Record<string, number>;
 };
 export type Dataset = {
+  deleted_at?: string;
   id: string;
   name: string;
   n: number;

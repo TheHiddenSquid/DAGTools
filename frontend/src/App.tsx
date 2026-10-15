@@ -22,11 +22,13 @@ import {
   Settings2,
   ShieldCheck,
   Square,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
 import { GraphEditor } from "./GraphEditor";
 import { ScoreChart } from "./ScoreChart";
+import { SampleManager } from "./SampleManager";
 import type {
   Algorithm,
   Dataset,
@@ -219,6 +221,8 @@ export default function App() {
     [sampleName, setSampleName] = useState("Generated sample"),
     [csvHeader, setCsvHeader] = useState(true);
   const [help, setHelp] = useState(false);
+  const [sampleManager, setSampleManager] = useState(false);
+  const [allSamples, setAllSamples] = useState<Dataset[]>([]);
   const csvInput = useRef<HTMLInputElement>(null),
     experimentInput = useRef<HTMLInputElement>(null);
   const defaultWorkspace = useRef<Workspace | null>(null);
@@ -322,7 +326,12 @@ export default function App() {
     [workspace],
   );
   useEffect(() => {
-    if (!workspace?.dataset_id) return;
+    if (!workspace?.dataset_id) {
+      setScore(null);
+      setScoreError("");
+      setScoring(false);
+      return;
+    }
     const controller = new AbortController();
     setScoring(true);
     setScoreError("");
@@ -420,6 +429,62 @@ export default function App() {
       : emptyGraph(next);
     update({ dataset_id: next.id, candidate_graph: graph });
   }
+  async function manageSamples() {
+    await action("samples", async () => {
+      setAllSamples(await api<Dataset[]>("/datasets?include_deleted=true"));
+      setSampleManager(true);
+    });
+  }
+  async function deleteSample(sample: Dataset) {
+    await action("deleteSample", async () => {
+      const deleted = await api<Dataset>(`/datasets/${sample.id}/delete`, {
+        method: "POST",
+      });
+      const remaining = datasets.filter((item) => item.id !== sample.id);
+      setDatasets(remaining);
+      setAllSamples((items) =>
+        items.map((item) => (item.id === sample.id ? deleted : item)),
+      );
+      if (latestWorkspace.current?.dataset_id === sample.id) {
+        if (remaining.length) activateDataset(remaining[0]);
+        else update({ dataset_id: null });
+      }
+      notify(`Deleted ${sample.name}. It can be restored in Manage samples.`);
+    });
+  }
+  async function restoreSample(sample: Dataset) {
+    await action("restoreSample", async () => {
+      const restored = await api<Dataset>(`/datasets/${sample.id}/restore`, {
+        method: "POST",
+      });
+      setDatasets((items) => [
+        restored,
+        ...items.filter((item) => item.id !== restored.id),
+      ]);
+      setAllSamples((items) =>
+        items.map((item) => (item.id === sample.id ? restored : item)),
+      );
+      if (!latestWorkspace.current?.dataset_id) activateDataset(restored);
+      notify(`Restored ${sample.name}.`);
+    });
+  }
+  async function ensureSample(id: string) {
+    let sample =
+      datasets.find((item) => item.id === id) ||
+      (await api<Dataset>(`/datasets/${id}`));
+    if (sample.deleted_at)
+      sample = await api<Dataset>(`/datasets/${id}/restore`, {
+        method: "POST",
+      });
+    setDatasets((items) => [
+      sample,
+      ...items.filter((item) => item.id !== sample.id),
+    ]);
+    setAllSamples((items) =>
+      items.map((item) => (item.id === sample.id ? sample : item)),
+    );
+    return sample;
+  }
   async function generate() {
     if (!workspace) return;
     await action("generate", async () => {
@@ -489,15 +554,20 @@ export default function App() {
       });
       setExperiments((es) => [record, ...es]);
       setDatasets(await api<Dataset[]>("/datasets"));
-      openExperiment(record);
+      await applyExperiment(record);
       notify("Experiment imported.");
     });
   }
-  function openExperiment(record: Experiment) {
+  async function applyExperiment(record: Experiment) {
+    if (record.workspace.dataset_id)
+      await ensureSample(record.workspace.dataset_id);
     setWorkspace(clone(record.workspace));
     setSavedId(record.id);
     setSavedSnapshot(JSON.stringify(record.workspace));
     setPage("explore");
+  }
+  function openExperiment(record: Experiment) {
+    void action("open", () => applyExperiment(record));
   }
   async function optimizePartition() {
     if (!workspace?.dataset_id) return;
@@ -574,18 +644,32 @@ export default function App() {
       notify("Search started in a separate process. You can keep editing.");
     });
   }
-  function adoptRun(run: Run) {
+  async function adoptRun(run: Run, stayInRuns = false) {
     if (!run.result) return;
-    if (run.request.dataset_id !== workspace?.dataset_id) {
-      fail("Select the dataset used by this run before applying its model.");
-      return;
-    }
-    update({
-      candidate_graph: clone(run.result.graph),
-      center: run.request.settings.center,
+    await action("adopt", async () => {
+      await ensureSample(run.request.dataset_id);
+      setWorkspace((current) =>
+        current
+          ? {
+              ...current,
+              dataset_id: run.request.dataset_id,
+              candidate_graph: clone(run.result!.graph),
+              center: run.request.settings.center,
+              settings: {
+                ...current.settings,
+                center: run.request.settings.center,
+                start_from_candidate: true,
+              },
+            }
+          : current,
+      );
+      if (!stayInRuns) setPage("explore");
+      notify(
+        stayInRuns
+          ? "Result set as the DAG in Explore & score and the starting point for your next run. Choose an algorithm, then run it."
+          : "Result sent to Explore & score. Your next run can start from this DAG.",
+      );
     });
-    setPage("explore");
-    notify("Result copied to the candidate editor.");
   }
 
   if (!workspace)
@@ -743,34 +827,58 @@ export default function App() {
               <p>{pageInfo[page][1]}</p>
             </div>
             {page !== "experiments" && (
-              <div className="dataset-selector">
-                <Database size={16} />
-                <div>
-                  <small>ACTIVE SAMPLE</small>
-                  <select
-                    aria-label="Active sample"
-                    value={workspace.dataset_id || ""}
-                    onChange={(e) => {
-                      const next = datasets.find(
-                        (d) => d.id === e.target.value,
-                      );
-                      if (next) activateDataset(next);
-                    }}
-                  >
-                    {datasets.map((d) => (
-                      <option key={d.id} value={d.id}>
-                        {d.name}
-                      </option>
-                    ))}
-                  </select>
+              <div className="sample-controls">
+                <div className="dataset-selector">
+                  <Database size={16} />
+                  <div>
+                    <small>ACTIVE SAMPLE</small>
+                    <span className="dataset-name">
+                      {dataset?.name || "No active sample"}
+                    </span>
+                    <select
+                      aria-label="Active sample"
+                      title="Choose the active sample"
+                      value={workspace.dataset_id || ""}
+                      disabled={!datasets.length}
+                      onChange={(e) => {
+                        const next = datasets.find(
+                          (d) => d.id === e.target.value,
+                        );
+                        if (next) activateDataset(next);
+                      }}
+                    >
+                      {!datasets.length && (
+                        <option value="">No active sample</option>
+                      )}
+                      {datasets.map((d) => (
+                        <option key={d.id} value={d.id}>
+                          {d.name}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <ChevronDown size={14} />
                 </div>
-                <ChevronDown size={14} />
+                <button
+                  className="secondary manage-samples"
+                  aria-label="Manage samples"
+                  title="Manage samples"
+                  onClick={manageSamples}
+                  disabled={!!busy}
+                >
+                  <Trash2 size={16} />
+                </button>
               </div>
             )}
           </div>
 
           {page === "explore" && (
             <>
+              {!dataset && (
+                <div className="info-box no-sample-message">
+                  Generate, import, or restore a sample to see live BIC scores.
+                </div>
+              )}
               <div className="score-row">
                 <section
                   className={`score-card main-score ${scoring ? "updating" : ""}`}
@@ -779,7 +887,7 @@ export default function App() {
                     BIC SCORE{" "}
                     <span className="live-badge">
                       <span />
-                      {scoring ? "Updating" : "Live"}
+                      {!dataset ? "No sample" : scoring ? "Updating" : "Live"}
                     </span>
                   </div>
                   <div className="score-value">
@@ -883,7 +991,7 @@ export default function App() {
                     <button
                       className="secondary full"
                       onClick={optimizePartition}
-                      disabled={!!busy}
+                      disabled={!!busy || !dataset}
                     >
                       {busy === "partition" ? (
                         <Loader2 size={14} className="spin" />
@@ -1092,6 +1200,30 @@ export default function App() {
                 <p className="algorithm-description">
                   {algorithm?.description}
                 </p>
+                <div className="starting-dag" aria-label="Starting DAG summary">
+                  <GitBranch size={17} />
+                  <div>
+                    <strong>
+                      {workspace.settings.start_from_candidate
+                        ? "Starting DAG: Explore & score"
+                        : "Fresh start"}
+                    </strong>
+                    <span>
+                      {workspace.settings.start_from_candidate
+                        ? `${workspace.candidate_graph.nodes.length} variables · ${workspace.candidate_graph.edges.length} edges · ${groupNames.length} groups`
+                        : workspace.algorithm === "mcmc"
+                          ? "Empty graph; separate variance groups unless the partition is fixed."
+                          : "Random initial graphs for the restarts."}
+                    </span>
+                  </div>
+                  <button
+                    aria-label="View starting DAG in Explore and score"
+                    title="View DAG in Explore & score"
+                    onClick={() => setPage("explore")}
+                  >
+                    <ArrowUpRight size={16} />
+                  </button>
+                </div>
                 <div className="config-fields">
                   {algorithm?.fields.map((field) => (
                     <SettingField
@@ -1120,7 +1252,9 @@ export default function App() {
                 <button
                   className="primary full run-button"
                   onClick={startRun}
-                  disabled={!!busy || !!activeRun || !!scoreError}
+                  disabled={
+                    !!busy || !!activeRun || !!scoreError || !dataset || scoring
+                  }
                 >
                   {busy === "run" ? (
                     <Loader2 size={16} className="spin" />
@@ -1201,16 +1335,28 @@ export default function App() {
                                     : "Run interrupted"}
                           </h2>
                         </div>
-                        <span className={`run-status ${currentRun.status}`}>
-                          {currentRun.status === "running" ? (
-                            <Loader2 size={13} className="spin" />
-                          ) : currentRun.status === "completed" ? (
-                            <Check size={13} />
-                          ) : (
-                            <Square size={11} />
-                          )}{" "}
-                          {currentRun.status}
-                        </span>
+                        <div className="run-heading-actions">
+                          {result && (
+                            <button
+                              className="primary"
+                              disabled={!!busy}
+                              onClick={() => void adoptRun(currentRun)}
+                            >
+                              <ArrowUpRight size={14} />
+                              Send to Explore & score
+                            </button>
+                          )}
+                          <span className={`run-status ${currentRun.status}`}>
+                            {currentRun.status === "running" ? (
+                              <Loader2 size={13} className="spin" />
+                            ) : currentRun.status === "completed" ? (
+                              <Check size={13} />
+                            ) : (
+                              <Square size={11} />
+                            )}{" "}
+                            {currentRun.status}
+                          </span>
+                        </div>
                       </div>
                       <p className="small muted">
                         Sample:{" "}
@@ -1302,10 +1448,11 @@ export default function App() {
                         <div className="result-actions">
                           <button
                             className="primary"
-                            onClick={() => adoptRun(currentRun)}
+                            onClick={() => void adoptRun(currentRun, true)}
+                            disabled={!!busy}
                           >
                             <Copy size={14} />
-                            Explore this result
+                            Use as next starting DAG
                           </button>
                           <a
                             className="secondary"
@@ -1438,7 +1585,13 @@ export default function App() {
                     className="primary"
                     onClick={() => {
                       if (defaultWorkspace.current) {
-                        setWorkspace(clone(defaultWorkspace.current));
+                        const next = clone(defaultWorkspace.current);
+                        const sample = dataset || datasets[0];
+                        next.dataset_id = sample?.id ?? null;
+                        next.candidate_graph = sample
+                          ? emptyGraph(sample)
+                          : { ...clone(next.source_graph), edges: [] };
+                        setWorkspace(next);
                         setSavedId(null);
                         setSavedSnapshot("");
                         setPage("data");
@@ -1605,6 +1758,17 @@ export default function App() {
             </div>
           </section>
         </div>
+      )}
+      {sampleManager && (
+        <SampleManager
+          samples={allSamples}
+          activeId={workspace.dataset_id}
+          busy={!!busy}
+          runningSampleId={activeRun?.request.dataset_id}
+          onClose={() => setSampleManager(false)}
+          onDelete={(sample) => void deleteSample(sample)}
+          onRestore={(sample) => void restoreSample(sample)}
+        />
       )}
     </div>
   );

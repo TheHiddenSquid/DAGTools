@@ -1,0 +1,116 @@
+import { Database, RotateCcw, Trash2, X } from "lucide-react";
+import type { Dataset } from "./types";
+
+type Props = {
+  samples: Dataset[];
+  activeId: string | null;
+  busy: boolean;
+  runningSampleId?: string;
+  onClose: () => void;
+  onDelete: (sample: Dataset) => void;
+  onRestore: (sample: Dataset) => void;
+};
+
+export function SampleManager({
+  samples,
+  activeId,
+  busy,
+  runningSampleId,
+  onClose,
+  onDelete,
+  onRestore,
+}: Props) {
+  const available = samples.filter((sample) => !sample.deleted_at);
+  const deleted = samples.filter((sample) => sample.deleted_at);
+  function row(sample: Dataset) {
+    const isDeleted = !!sample.deleted_at;
+    const running = runningSampleId === sample.id;
+    return (
+      <div className="sample-row" key={sample.id}>
+        <span className="sample-row-icon">
+          <Database size={18} />
+        </span>
+        <div>
+          <strong>
+            {sample.name}
+            {!isDeleted && sample.id === activeId && (
+              <span className="subtle-tag">Active</span>
+            )}
+          </strong>
+          <small>
+            {sample.n.toLocaleString()} observations · {sample.p} variables
+            {running ? " · Used by active run" : ""}
+          </small>
+        </div>
+        <button
+          className={isDeleted ? "secondary" : "sample-delete"}
+          disabled={busy || running}
+          aria-label={`${isDeleted ? "Restore" : "Delete"} sample ${sample.name}`}
+          title={
+            running
+              ? "Stop the active run before deleting its sample"
+              : undefined
+          }
+          onClick={() => (isDeleted ? onRestore(sample) : onDelete(sample))}
+        >
+          {isDeleted ? (
+            <>
+              <RotateCcw size={14} />
+              Restore
+            </>
+          ) : (
+            <Trash2 size={16} />
+          )}
+        </button>
+      </div>
+    );
+  }
+  return (
+    <div
+      className="modal-backdrop"
+      onClick={onClose}
+      onKeyDown={(event) => {
+        if (event.key === "Escape") onClose();
+      }}
+    >
+      <section
+        className="sample-modal"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="samples-title"
+        onClick={(event) => event.stopPropagation()}
+      >
+        <button
+          className="modal-close"
+          autoFocus
+          aria-label="Close sample manager"
+          onClick={onClose}
+        >
+          <X size={18} />
+        </button>
+        <div className="eyebrow">YOUR OBSERVATIONS</div>
+        <h2 id="samples-title">Manage samples</h2>
+        <p>
+          Delete samples you no longer need in the selector. You can restore
+          them here; saved experiments and run results keep their data.
+        </p>
+        <div className="sample-list">
+          {available.length ? (
+            available.map(row)
+          ) : (
+            <p className="samples-empty">
+              No active samples. Generate, import, or restore a sample to
+              continue scoring.
+            </p>
+          )}
+        </div>
+        {deleted.length > 0 && (
+          <details className="deleted-samples" open>
+            <summary>Deleted samples ({deleted.length})</summary>
+            {deleted.map(row)}
+          </details>
+        )}
+      </section>
+    </div>
+  );
+}

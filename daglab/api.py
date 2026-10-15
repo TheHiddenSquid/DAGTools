@@ -57,6 +57,8 @@ def create_app(data_dir=None):
         return JSONResponse({"detail": str(exc.args[0])}, status_code=404)
 
     def get_scorer(key, center):
+        if store.get("dataset", key).get("deleted_at"):
+            raise ValueError("Restore this sample before scoring a model with it.")
         cache_key = key, center
         if cache_key not in scorers:
             dataset = store.get("dataset", key)
@@ -77,28 +79,49 @@ def create_app(data_dir=None):
     @app.get("/api/bootstrap")
     def bootstrap():
         datasets = store.list("dataset")
-        if not datasets:
+        if not datasets and not store.list("dataset", include_deleted=True):
             graph = demo_graph()
             data, columns = simulate(graph, 1000, 42)
             dataset = store.add_dataset(data, columns, "Five-variable demo", {"type": "generated", "seed": 42, "graph": graph.model_dump()})
             datasets = [dataset]
-        dataset = datasets[0]
-        source = dataset["provenance"].get("graph") or demo_graph().model_dump()
+        dataset = datasets[0] if datasets else None
+        source = (dataset["provenance"].get("graph") if dataset else None) or demo_graph().model_dump()
         source_graph = Graph.model_validate(source)
-        if dataset["provenance"].get("graph"):
+        if dataset and dataset["provenance"].get("graph"):
             candidate = source_graph.model_copy(deep=True)
             # A useful starting point: a partial structure rather than the truth.
             candidate.edges = candidate.edges[:2]
-        else:
+        elif dataset:
             candidate = Graph(nodes=[{**c, "group": str(i+1), "x": 60 + (i % 4) * 200, "y": 80 + (i // 4) * 130}
                                      for i, c in enumerate(dataset["columns"])])
-        return {"datasets": datasets, "workspace": Workspace(name="Structure discovery", dataset_id=dataset["id"],
+        else:
+            candidate = source_graph.model_copy(deep=True)
+            candidate.edges = []
+        return {"datasets": datasets, "workspace": Workspace(name="Structure discovery", dataset_id=dataset["id"] if dataset else None,
                     source_graph=source_graph, candidate_graph=candidate).model_dump(),
                 "algorithms": algorithms(), "experiments": store.list("workspace"), "runs": jobs.list()}
 
     @app.get("/api/datasets")
-    def datasets():
-        return store.list("dataset")
+    def datasets(include_deleted: bool = False):
+        return store.list("dataset", include_deleted=include_deleted)
+
+    @app.post("/api/datasets/{key}/delete")
+    def delete_dataset(key: str):
+        with jobs.lock:
+            store.get("dataset", key)
+            if any(run["status"] == "running" and run["request"]["dataset_id"] == key for run in jobs.list()):
+                raise HTTPException(409, "Stop the active run before deleting its sample.")
+            with score_lock:
+                record = store.set_dataset_deleted(key, True)
+                for cache_key in list(scorers):
+                    if cache_key[0] == key:
+                        scorers.pop(cache_key)
+            return record
+
+    @app.post("/api/datasets/{key}/restore")
+    def restore_dataset(key: str):
+        with jobs.lock:
+            return store.set_dataset_deleted(key, False)
 
     @app.get("/api/datasets/{key}")
     def dataset(key: str):

@@ -717,15 +717,18 @@ main {
   fill: #718264;
 }
 .variable-node {
-  min-width: 125px;
-  padding: 12px 14px 12px 12px;
+  width: 88px;
+  height: 88px;
+  min-width: 88px;
+  padding: 10px;
   display: flex;
-  gap: 10px;
+  justify-content: center;
+  text-align: center;
   align-items: center;
-  background: white;
-  border: 1px solid #d8e2d1;
-  border-radius: 9px;
-  box-shadow: 0 3px 6px #293e2110;
+  background: color-mix(in srgb, var(--node-color) 19%, white);
+  border: 1.5px solid color-mix(in srgb, var(--node-color) 65%, white);
+  border-radius: 50%;
+  box-shadow: 0 2px 5px #293e2109;
   position: relative;
 }
 .variable-node.is-selected {
@@ -747,7 +750,7 @@ main {
   font-size: 12px;
   letter-spacing: -0.2px;
   display: block;
-  max-width: 90px;
+  max-width: 65px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -755,7 +758,7 @@ main {
 .variable-node small {
   display: block;
   font-size: 7px;
-  color: #9ca694;
+  color: color-mix(in srgb, var(--node-color) 80%, #24372f);
   margin-top: 4px;
 }
 .react-flow__handle {
@@ -2375,5 +2378,200 @@ tbody tr:last-child td {
   }
   .canvas-legend > span {
     font-size: 8px;
+  }
+}
+
+/* The native selector covers the whole card, including icon, label and arrow. */
+.sample-controls {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+.dataset-selector {
+  position: relative;
+}
+.dataset-selector .dataset-name {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  color: #34473a;
+}
+.dataset-selector select {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  width: 100%;
+  height: 100%;
+  opacity: 0;
+  cursor: pointer;
+}
+.dataset-selector select:disabled {
+  cursor: default;
+}
+.dataset-selector:focus-within {
+  outline: 2px solid #69927b;
+  outline-offset: 3px;
+}
+.dataset-selector > svg,
+.dataset-selector .dataset-name,
+.dataset-selector small {
+  pointer-events: none;
+}
+.manage-samples {
+  width: 39px;
+  padding: 0;
+  color: #84917b;
+}
+.sample-modal {
+  position: relative;
+  width: 580px;
+  max-width: 100%;
+  max-height: 85vh;
+  overflow: auto;
+  background: #fff;
+  border: 1px solid #dce6d3;
+  border-radius: 14px;
+  padding: 30px;
+  box-shadow: 0 25px 90px #152c2640;
+}
+.sample-modal h2 {
+  font-size: 23px;
+  margin: 8px 0 12px;
+}
+.sample-modal > p {
+  color: #7a8973;
+  font-size: 11px;
+  max-width: 440px;
+}
+.sample-list {
+  margin-top: 20px;
+}
+.sample-row {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  padding: 15px 0;
+  border-top: 1px solid #edf1e6;
+}
+.sample-row > div {
+  flex: 1;
+  min-width: 0;
+}
+.sample-row strong {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+.sample-row small {
+  display: block;
+  font-size: 10px;
+  color: #829079;
+  margin-top: 6px;
+}
+.sample-row-icon {
+  width: 34px;
+  height: 34px;
+  border-radius: 8px;
+  background: #f1f6eb;
+  color: #849b73;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.sample-delete {
+  padding: 9px;
+  color: #aa806b;
+  border-radius: 6px;
+}
+.sample-delete:hover:not(:disabled) {
+  background: #fbf1ea;
+}
+.deleted-samples {
+  margin-top: 16px;
+}
+.deleted-samples summary {
+  cursor: pointer;
+  color: #7a8971;
+  font-size: 11px;
+  padding: 12px 0;
+}
+.deleted-samples .sample-row {
+  opacity: 0.85;
+}
+.samples-empty {
+  font-size: 11px;
+  color: #819177;
+  padding: 20px 0;
+}
+.no-sample-message {
+  margin: 0 0 20px;
+}
+.starting-dag {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  padding: 12px;
+  margin: 0 0 18px;
+  background: #f2f6eb;
+  border: 1px solid #e1e9d7;
+  border-radius: 7px;
+}
+.starting-dag > svg {
+  color: #88a071;
+  margin-top: 2px;
+}
+.starting-dag > div {
+  flex: 1;
+  min-width: 0;
+}
+.starting-dag strong {
+  display: block;
+  font-size: 10px;
+  line-height: 1.5;
+  font-weight: 500;
+  color: #5b7849;
+}
+.starting-dag span {
+  display: block;
+  font-size: 9px;
+  line-height: 1.7;
+  margin-top: 5px;
+  color: #859575;
+}
+.starting-dag button {
+  padding: 2px;
+  color: #7b9468;
+}
+.run-summary .run-heading-actions {
+  display: flex;
+  flex-direction: row;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+}
+.run-summary > .section-heading {
+  flex-wrap: wrap;
+}
+@media (max-width: 740px) {
+  .sample-controls {
+    width: 100%;
+  }
+  .sample-controls .dataset-selector {
+    flex: 1;
+    width: auto;
+  }
+  .sample-controls .dataset-selector > div {
+    min-width: 0;
+  }
+  .sample-modal {
+    padding: 24px;
   }
 }

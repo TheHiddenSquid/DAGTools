@@ -1,4 +1,5 @@
 import json
+import io
 import time
 
 from fastapi.testclient import TestClient
@@ -93,3 +94,60 @@ def test_malformed_experiment_cannot_create_an_orphan_dataset(client):
     response = client.post("/api/workspaces/import", files={"file": ("bad.json", json.dumps(bundle))})
     assert response.status_code == 422
     assert len(client.get("/api/datasets").json()) == before
+
+
+def test_sample_deletion_is_reversible_and_preserves_saved_experiments(client):
+    initial = client.get("/api/bootstrap").json()
+    workspace = initial["workspace"]
+    key = workspace["dataset_id"]
+    saved = client.post("/api/workspaces", json=workspace).json()
+    original_csv = client.get(f"/api/datasets/{key}/csv").text
+    deleted = client.post(f"/api/datasets/{key}/delete")
+    assert deleted.status_code == 200 and deleted.json()["deleted_at"]
+    assert client.get("/api/datasets").json() == []
+    assert len(client.get("/api/datasets?include_deleted=true").json()) == 1
+    empty = client.get("/api/bootstrap").json()
+    assert empty["datasets"] == [] and empty["workspace"]["dataset_id"] is None
+    assert empty["experiments"][0]["id"] == saved["id"]
+    assert client.post("/api/workspaces/export", json=workspace).status_code == 200
+    score_request = {"dataset_id": key, "graph": workspace["candidate_graph"]}
+    assert client.post("/api/score", json=score_request).status_code == 422
+    assert client.post(f"/api/datasets/{key}/restore").status_code == 200
+    assert len(client.get("/api/datasets").json()) == 1
+    assert client.get(f"/api/datasets/{key}/csv").text == original_csv
+    assert client.post("/api/score", json=score_request).status_code == 200
+
+
+def test_cannot_delete_sample_used_by_active_worker(client):
+    workspace = client.get("/api/bootstrap").json()["workspace"]
+    key = workspace["dataset_id"]
+    body = {"dataset_id": key, "graph": workspace["candidate_graph"], "algorithm": "mcmc",
+            "settings": {"num_iters": 100_000_000}}
+    run = client.post("/api/runs", json=body).json()
+    assert client.post(f"/api/datasets/{key}/delete").status_code == 409
+    client.post(f"/api/runs/{run['id']}/cancel")
+    assert client.post(f"/api/datasets/{key}/delete").status_code == 200
+    assert client.post("/api/runs", json=body).status_code == 422
+
+
+def test_algorithm_output_can_seed_next_algorithm_without_changing_old_run(client):
+    import numpy as np
+    workspace = client.get("/api/bootstrap").json()["workspace"]
+    def wait_for_result(run):
+        deadline = time.monotonic()+30
+        while time.monotonic()<deadline:
+            record = client.get(f"/api/runs/{run['id']}").json()
+            if record["status"] != "running":
+                assert record["status"] == "completed", record
+                return record
+            time.sleep(0.1)
+        pytest.fail("Algorithm worker did not finish.")
+    first = wait_for_result(client.post("/api/runs", json={"dataset_id": workspace["dataset_id"],
+        "graph": workspace["candidate_graph"], "algorithm": "greedy_color", "settings": {"num_starts": 1}}).json())
+    second = wait_for_result(client.post("/api/runs", json={"dataset_id": workspace["dataset_id"],
+        "graph": first["result"]["graph"], "algorithm": "mcmc",
+        "settings": {"num_iters": 1, "start_from_candidate": True, "fixed_partition": True, "record_history": True}}).json())
+    assert second["request"]["graph"] == first["result"]["graph"]
+    history = np.load(io.BytesIO(client.get(f"/api/runs/{second['id']}/history").content), allow_pickle=False)
+    assert history[0] == pytest.approx(first["result"]["score"])
+    assert client.get(f"/api/runs/{first['id']}").json()["result"] == first["result"]

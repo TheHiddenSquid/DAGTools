@@ -31,6 +31,8 @@ class Jobs:
             raise ValueError("Algorithm runs currently require more observations than variables.")
         Scorer(data, dataset["columns"], request.settings.center).score(request.graph)
         with self.lock:
+            if self.store.get("dataset", request.dataset_id).get("deleted_at"):
+                raise ValueError("Restore this sample before starting a new run.")
             self.list()
             if any(process.poll() is None for process in self.processes.values()):
                 raise ValueError("One run is already active. Stop it or wait for it to finish.")

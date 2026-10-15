@@ -2,6 +2,8 @@ import { useCallback, useMemo, useRef, useState } from "react";
 import {
   Background,
   BackgroundVariant,
+  BaseEdge,
+  ConnectionLineType,
   Controls,
   Handle,
   MarkerType,
@@ -9,12 +11,15 @@ import {
   ReactFlow,
   ReactFlowProvider,
   useReactFlow,
+  useInternalNode,
+  getStraightPath,
 } from "@xyflow/react";
 import type {
   Connection as FlowConnection,
   NodeProps,
   Node as FlowNode,
   NodeChange,
+  EdgeProps,
 } from "@xyflow/react";
 import {
   ArrowLeftRight,
@@ -31,6 +36,7 @@ import {
 import type { ReactNode } from "react";
 import type { Graph } from "./types";
 import { clone, groupColor } from "./types";
+import { circleSegment } from "./edgeGeometry";
 
 type VariableFlowNode = FlowNode<
   { label: string; group: string; color: string },
@@ -43,10 +49,7 @@ function VariableNode({ data, selected }: NodeProps<VariableFlowNode>) {
       style={{ "--node-color": data.color } as React.CSSProperties}
     >
       <Handle type="target" position={Position.Left} />
-      <span className="node-icon">
-        <GitBranch size={17} />
-      </span>
-      <span>
+      <span title={data.label}>
         <strong>{data.label}</strong>
         <small>Group {data.group}</small>
       </span>
@@ -55,6 +58,42 @@ function VariableNode({ data, selected }: NodeProps<VariableFlowNode>) {
   );
 }
 const nodeTypes = { variable: VariableNode };
+
+function CircleEdge(props: EdgeProps) {
+  const source = useInternalNode(props.source);
+  const target = useInternalNode(props.target);
+  if (!source || !target) return null;
+  const segment = circleSegment(
+    {
+      ...source.internals.positionAbsolute,
+      width: source.measured.width ?? 88,
+      height: source.measured.height ?? 88,
+    },
+    {
+      ...target.internals.positionAbsolute,
+      width: target.measured.width ?? 88,
+      height: target.measured.height ?? 88,
+    },
+  );
+  if (!segment) return null;
+  const [path, labelX, labelY] = getStraightPath(segment);
+  return (
+    <BaseEdge
+      id={props.id}
+      path={path}
+      labelX={labelX}
+      labelY={labelY}
+      markerEnd={props.markerEnd}
+      style={props.style}
+      label={props.label}
+      labelStyle={props.labelStyle}
+      labelBgStyle={props.labelBgStyle}
+      labelBgPadding={props.labelBgPadding}
+      interactionWidth={20}
+    />
+  );
+}
+const edgeTypes = { circle: CircleEdge };
 
 function wouldCycle(graph: Graph, source: string, target: string) {
   const pending = [target],
@@ -143,18 +182,18 @@ function Editor({
           type: MarkerType.ArrowClosed,
           width: 18,
           height: 18,
-          color: "#82908c",
+          color: "#637b70",
         }
       : undefined,
     selected:
       selected?.kind === "edge" &&
       selected.id === ("id" in e ? e.id : `result-${i}`),
     label: source && "weight" in e ? Number(e.weight).toFixed(2) : undefined,
-    style: { stroke: "#82908c", strokeWidth: 1.6 },
+    style: { stroke: "#637b70", strokeWidth: 1.8 },
     labelStyle: { fill: "#69766e", fontSize: 10 },
     labelBgStyle: { fill: "#fafbf9" },
     labelBgPadding: [5, 3] as [number, number],
-    type: "default",
+    type: "circle",
   }));
   function connect(connection: FlowConnection) {
     const { source: a, target: b } = connection;
@@ -331,6 +370,8 @@ function Editor({
             nodes={nodes}
             edges={edges}
             nodeTypes={nodeTypes}
+            edgeTypes={edgeTypes}
+            connectionLineType={ConnectionLineType.Straight}
             fitView
             fitViewOptions={{ padding: 0.23, maxZoom: 1.1 }}
             minZoom={0.15}
