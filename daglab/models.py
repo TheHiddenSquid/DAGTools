@@ -121,7 +121,7 @@ class RunSettings(Model):
     start_from_candidate: bool = True
     fixed_partition: bool = False
     num_iters: int = Field(default=20000, ge=1, le=100_000_000)
-    num_starts: int = Field(default=5, ge=1, le=100)
+    num_starts: int = Field(default=5, ge=1, le=10_000)
     mode: Literal["bic", "map"] = "bic"
     color_probability: float = Field(default=0.4, ge=0, le=1)
     moves: list[Literal["add_edge", "remove_edge", "flip_edge", "change_color"]] = Field(

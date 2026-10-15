@@ -57,14 +57,14 @@ REGISTRY = {
     "greedy_color": {
         "id": "greedy_color", "name": "Greedy · graph + colors", "description": "Joint local search over edge moves and color assignments.",
         "source": "ColoredNodes/GreedyColorfuncs.py · CausalGreedyColor", "progress_unit": "restarts",
-        "fields": [field("num_starts", "Random restarts", "number", min=1, max=100, step=1),
+        "fields": [field("num_starts", "Random restarts", "number", min=1, max=10_000, step=1),
                    field("fixed_partition", "Fix candidate partition", "boolean"),
                    field("moves", "Allowed moves", "multiselect", options=MOVES), REFINE] + COMMON,
     },
     "greedy_dp": {
         "id": "greedy_dp", "name": "Greedy · optimal partition", "description": "Edge search with dynamic programming to optimize the variance partition at each step.",
         "source": "ColoredNodes/GreedyDPfuncs.py · CausalGreedyDP", "progress_unit": "restarts",
-        "fields": [field("num_starts", "Random restarts", "number", min=1, max=100, step=1),
+        "fields": [field("num_starts", "Random restarts", "number", min=1, max=10_000, step=1),
                    field("moves", "Allowed moves", "multiselect", options=MOVES[:3])] + COMMON,
     },
 }

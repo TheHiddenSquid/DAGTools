@@ -92,8 +92,8 @@ run must be stopped before deletion. Local filesystem/database deletions use
 recoverable staging so interrupted deletions can be finished or rolled back on
 restart. These are permanent removals from the app, not forensic disk erasure.
 
-Select a variable to see a solid outer ring and check mark. Other variables in
-the same variance group receive dashed rings and dots, the group is highlighted
+Select a variable to see a solid outer ring. Other variables in
+the same variance group receive dashed rings, the group is highlighted
 in the legend, and the inspector lists its peers. Clearing the selection clears
 these indicators without changing graph positions or group colors.
 
@@ -211,7 +211,8 @@ the settings; changing algorithm code, dependency versions, or MCMC batch size
 can change a trajectory. Runs made with uncommitted code are marked as modified.
 
 Limits in this version: 1–100 variables, 2–1,000,000 observations, 50 MB CSV or
-experiment imports, 1–100 million MCMC iterations, and at most 2 million
+experiment imports, 1–10,000 greedy random restarts, 1–100 million MCMC iterations,
+and at most 2 million
 iterations when exact per-iteration history is enabled. Practical interactive
 limits depend on graph density and hardware. Algorithm runs require more
 observations than variables; singular/near-zero-variance models report errors.

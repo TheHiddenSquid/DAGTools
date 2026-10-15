@@ -62,19 +62,6 @@ const VariableNode = memo(function VariableNode({
       className={`variable-node ${selected ? "is-selected" : data.sameGroup ? "is-group-peer" : ""}`}
       style={{ "--node-color": data.color } as React.CSSProperties}
     >
-      {(selected || data.sameGroup) && (
-        <span
-          className={`node-selection-badge ${selected ? "selected-badge" : ""}`}
-          title={
-            selected
-              ? "Selected variable"
-              : "Same variance group as selected variable"
-          }
-          aria-label={selected ? "Selected variable" : "Same variance group"}
-        >
-          {selected ? "✓" : "●"}
-        </span>
-      )}
       <Handle type="target" position={Position.Left} />
       <span title={data.label}>
         <strong>{data.label}</strong>
