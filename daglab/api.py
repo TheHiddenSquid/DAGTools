@@ -15,8 +15,9 @@ from fastapi.staticfiles import StaticFiles
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .algorithms import REGISTRY
+from .generation import circular_layout, random_graph, random_partition
 from .jobs import Jobs
-from .models import Column, GenerateRequest, Graph, RunRequest, ScoreRequest, Workspace, demo_graph
+from .models import Column, GenerateRequest, Graph, RunRequest, ScoreRequest, Workspace, RandomGraphRequest, RandomPartitionRequest, demo_graph
 from .scoring import Scorer, graph_arrays, simulate
 from .storage import Store, now
 
@@ -97,6 +98,8 @@ def create_app(data_dir=None):
         else:
             candidate = source_graph.model_copy(deep=True)
             candidate.edges = []
+        if dataset and not dataset["provenance"].get("graph"):
+            candidate = circular_layout(candidate)
         return {"datasets": datasets, "workspace": Workspace(name="Structure discovery", dataset_id=dataset["id"] if dataset else None,
                     source_graph=source_graph, candidate_graph=candidate).model_dump(),
                 "algorithms": algorithms(), "experiments": store.list("workspace"), "runs": jobs.list()}
@@ -145,6 +148,14 @@ def create_app(data_dir=None):
         writer.writerow([column["label"] for column in dataset["columns"]])
         writer.writerows(store.load_data(key))
         return Response(buffer.getvalue(), media_type="text/csv", headers={"Content-Disposition": 'attachment; filename="daglab-sample.csv"'})
+
+    @app.post("/api/graphs/random")
+    def generate_graph(request: RandomGraphRequest):
+        return random_graph(request).model_dump()
+
+    @app.post("/api/graphs/random-partition")
+    def generate_partition(request: RandomPartitionRequest):
+        return random_partition(request).model_dump()
 
     @app.post("/api/score")
     def score(request: ScoreRequest):

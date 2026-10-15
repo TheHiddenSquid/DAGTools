@@ -7,7 +7,7 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc -b && vite build",
     "preview": "vite preview --host 127.0.0.1",
-    "test:geometry": "tsc src/edgeGeometry.ts --target ES2022 --module ESNext --outDir .geometry-tests --skipLibCheck && node --test tests/edgeGeometry.test.mjs"
+    "test:geometry": "tsc src/edgeGeometry.ts src/graphLayout.ts --target ES2022 --module ESNext --outDir .geometry-tests --skipLibCheck && node --test tests/*.test.mjs"
   },
   "dependencies": {
     "@xyflow/react": "^12.9.0",

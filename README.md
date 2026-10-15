@@ -3,7 +3,7 @@
 A local interactive workbench for the node-colored Gaussian DAG algorithms in
 [DAGdiscovery](https://github.com/TheHiddenSquid/DAGdiscovery). Draw a generating
 model, generate or import observations, explore a candidate DAG with a live BIC
-score, and run the original discovery implementations.
+score, and run the original discovery implementations or Gaussian GES.
 
 The original DAGdiscovery repository is unchanged. In the separate DAGTools
 repository, the `original-colorednodes` tag preserves the research implementation
@@ -18,7 +18,8 @@ Python environment and builds the interface if necessary.
 
 Requirements: Python 3.11 or newer (tested on Python 3.12) and Node.js 20 or newer
 for building the interface. Initial setup downloads dependencies; subsequent
-use works offline. The Python dependencies are pinned in `requirements-lock.txt`
+use works offline. The launcher also installs updated Python requirements when their
+files change. The Python dependencies are pinned in `requirements-lock.txt`
 and the frontend dependencies in `frontend/package-lock.json`.
 
 For manual setup:
@@ -50,8 +51,8 @@ or `--data-dir /path/to/data` to choose a storage location.
    **Optimize partition** keeps the graph and finds the best variance partition
    using the existing dynamic-programming routine. **Copy reference** restores
    the graph and partition used to generate that sample.
-3. **Run algorithms.** Choose MCMC, greedy graph-and-color search, or greedy
-   search with an optimal partition. Settings appear from the Python registry.
+3. **Run algorithms.** Choose MCMC, greedy graph-and-color search, greedy
+   search with an optimal partition, or GES with Gaussian BIC. Settings appear from the Python registry.
    A separate worker executes a frozen snapshot of the inputs. You can keep
    editing while it runs. Inspect the trace, DAG, or partially directed result,
    then choose **Send to Explore & score** to load the result into the candidate
@@ -78,6 +79,29 @@ experiment or loading a run result restores its sample when needed. A sample
 used by an active run must wait until that run finishes or is stopped. Deleting
 the last sample leaves the editors available, with scoring disabled until a
 sample is generated, imported, or restored.
+
+## Random models and graph arrangement
+
+Both graph editors have a **Random** menu for a **Random DAG + partition** or a
+**Random partition only**. The DAG controls expose `p`, `density` (edge probability
+per pair in a uniformly shuffled causal order), `num_colors`, `lambda_min`,
+`lambda_max`, `omega_min`, `omega_max`, and `seed`. Defaults match the distributions
+in `ColoredNodes/utils.py`: edge probability 0.5, uniform signed coefficient
+magnitudes 0.25–1, and uniform group noise variances 0.2–2. As in the original
+partition generator, group assignments are independent and some colors may be
+unused. The new generators use a local NumPy RNG; seeds repeat within this
+implementation, rather than reproducing the legacy global-RNG sequence.
+
+In Explore & score, `p` is fixed to the active sample and variable IDs/names are
+preserved. A partition-only change keeps all edges, coefficients, and positions.
+Noise bounds specify **variances**, not standard deviations. These actions edit
+the model and support Undo; create a sample separately in Create data.
+
+New models use circular positions. **Arrange graph** places existing nodes in a
+circle and fits the view. This avoids edges lying along the same straight path
+through intermediate nodes; dense graphs can still have edge crossings. Saved
+manual layouts remain available. Dragging maintains the canvas state locally and
+commits one undoable position change on release.
 
 ## Score and statistical conventions
 
@@ -108,6 +132,16 @@ handle interventions, missing values, or latent variables.
 
 ## Algorithm behavior
 
+- **GES · Gaussian BIC:** standard greedy equivalence search using `ges==1.1.1`.
+  Forward and backward phases are enabled by default; optional turning and
+  repetition until convergence are available. Uses one variance per variable,
+  ignores candidate colors, and converts an initial DAG to its CPDAG before
+  searching. Both centered and fixed-zero-mean scoring are supported. Returns
+  the CPDAG and a consistent representative DAG with fitted parameters, ready
+  for export to Explore & score or the next algorithm. Native BIC is divided by
+  sample size and verified against the live scorer. Progress counts accepted
+  moves; its activity bar does not estimate a completion percentage. Collinear
+  sample columns are rejected.
 - **MCMC:** iterations, initial graph/partition, color-vs-edge move probability,
   BIC or most-visited-model selection, optional target BIC stopping, batch size,
   score history, and final partition refinement.
@@ -177,6 +211,8 @@ multi-user authentication or remote job queue and is intended for local use.
 ColoredNodes/          # existing research code, with optional integration hooks
 daglab/models.py        # graph, workspace, and settings contracts
 daglab/scoring.py       # live scorer and sample generation
+daglab/generation.py    # seeded random DAGs, partitions, circular layout
+daglab/ges_adapter.py   # Gaussian GES and consistent CPDAG/DAG handling
 daglab/algorithms.py    # adapter registry and UI field definitions
 daglab/worker.py        # isolated computation process
 daglab/jobs.py          # worker lifecycle and immutable run records

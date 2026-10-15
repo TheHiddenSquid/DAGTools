@@ -104,7 +104,13 @@ function SettingField({
     )
   )
     return null;
-  const value = settings[field.name];
+  const value =
+    settings[field.name] ??
+    (field.name === "ges_phases"
+      ? ["forward", "backward"]
+      : field.name === "ges_iterate"
+        ? false
+        : undefined);
   if (field.type === "boolean")
     return (
       <label className="toggle-field">
@@ -138,7 +144,13 @@ function SettingField({
                   onChange={(e) =>
                     onChange({
                       [field.name]: e.target.checked
-                        ? [...(value as string[]), option.value]
+                        ? field
+                            .options!.filter(
+                              (o) =>
+                                (value as string[]).includes(o.value) ||
+                                o.value === option.value,
+                            )
+                            .map((o) => o.value)
                         : (value as string[]).filter((v) => v !== option.value),
                     })
                   }
@@ -1181,6 +1193,8 @@ export default function App() {
                     onChange={(e) => {
                       const id = e.target.value;
                       update({ algorithm: id });
+                      if (id === "ges")
+                        updateSettings({ fixed_partition: false });
                       if (id === "greedy_dp")
                         updateSettings({
                           fixed_partition: false,
@@ -1210,10 +1224,12 @@ export default function App() {
                     </strong>
                     <span>
                       {workspace.settings.start_from_candidate
-                        ? `${workspace.candidate_graph.nodes.length} variables · ${workspace.candidate_graph.edges.length} edges · ${groupNames.length} groups`
-                        : workspace.algorithm === "mcmc"
-                          ? "Empty graph; separate variance groups unless the partition is fixed."
-                          : "Random initial graphs for the restarts."}
+                        ? `${workspace.candidate_graph.nodes.length} variables · ${workspace.candidate_graph.edges.length} edges${workspace.algorithm === "ges" ? " · colors ignored; converted to CPDAG" : ` · ${groupNames.length} groups`}`
+                        : workspace.algorithm === "ges"
+                          ? "Starts from the empty equivalence class."
+                          : workspace.algorithm === "mcmc"
+                            ? "Empty graph; separate variance groups unless the partition is fixed."
+                            : "Random initial graphs for the restarts."}
                     </span>
                   </div>
                   <button
@@ -1415,20 +1431,26 @@ export default function App() {
                         )}
                       </div>
                       {currentRun.status === "running" && (
-                        <div className="run-progress">
+                        <div
+                          className={`run-progress ${currentRun.request.algorithm === "ges" ? "indeterminate" : ""}`}
+                        >
                           <span
                             style={{
                               width:
-                                currentRun.request.algorithm === "mcmc"
-                                  ? `${Math.min(100, (100 * (currentRun.progress?.iteration ?? 0)) / currentRun.request.settings.num_iters)}%`
-                                  : `${Math.min(97, (100 * (currentRun.progress?.restart ?? 0)) / currentRun.request.settings.num_starts)}%`,
+                                currentRun.request.algorithm === "ges"
+                                  ? "35%"
+                                  : currentRun.request.algorithm === "mcmc"
+                                    ? `${Math.min(100, (100 * (currentRun.progress?.iteration ?? 0)) / currentRun.request.settings.num_iters)}%`
+                                    : `${Math.min(97, (100 * (currentRun.progress?.restart ?? 0)) / currentRun.request.settings.num_starts)}%`,
                             }}
                           />
                           <small>
                             {currentRun.progress?.phase || "Starting worker"}
                             {currentRun.progress?.restart
                               ? ` · restart ${currentRun.progress.restart}/${currentRun.request.settings.num_starts}`
-                              : ""}
+                              : currentRun.request.algorithm === "ges"
+                                ? ` · ${currentRun.progress?.iteration ?? 0} accepted moves`
+                                : ""}
                           </small>
                         </div>
                       )}
@@ -1443,7 +1465,16 @@ export default function App() {
                           Best
                         </span>
                       </div>
-                      <ScoreChart trace={resultTrace} />
+                      <ScoreChart
+                        trace={resultTrace}
+                        unit={
+                          currentRun.request.algorithm === "ges"
+                            ? "accepted moves"
+                            : currentRun.request.algorithm === "mcmc"
+                              ? "iterations"
+                              : "search steps"
+                        }
+                      />
                       {result && (
                         <div className="result-actions">
                           <button

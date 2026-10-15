@@ -1,3 +1,4 @@
+import { circularNodes } from "./graphLayout";
 export type Variable = {
   id: string;
   label: string;
@@ -42,6 +43,8 @@ export type Settings = {
   target_bic: number | null;
   record_history: boolean;
   chunk_size: number;
+  ges_phases: string[];
+  ges_iterate: boolean;
 };
 export type Workspace = {
   schema_version: 1;
@@ -170,12 +173,14 @@ export function groupColor(group: string, groups: string[]) {
 }
 export function emptyGraph(dataset: Dataset): Graph {
   return {
-    nodes: dataset.columns.map((c, i) => ({
-      ...c,
-      group: String(i + 1),
-      x: 60 + (i % 4) * 200,
-      y: 80 + Math.floor(i / 4) * 140,
-    })),
+    nodes: circularNodes(
+      dataset.columns.map((c, i) => ({
+        ...c,
+        group: String(i + 1),
+        x: 60 + (i % 4) * 200,
+        y: 80 + Math.floor(i / 4) * 140,
+      })),
+    ),
     edges: [],
     variances: Object.fromEntries(
       dataset.columns.map((_, i) => [String(i + 1), 1]),

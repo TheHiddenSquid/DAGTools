@@ -91,3 +91,45 @@ def test_target_stopping_at_initial_state_keeps_history_consistent():
     assert result["diagnostics"]["num_iters"] == 0
     assert result["diagnostics"]["target_reached"]
     assert len(history) == 1
+
+
+@pytest.mark.parametrize('center', [True, False])
+@pytest.mark.parametrize('start', [True, False])
+def test_ges_matches_live_bic_and_preserves_equivalence_class(center, start):
+    from ges.utils import dag_to_cpdag
+    from daglab.scoring import Scorer, graph_arrays
+    graph = demo_graph()
+    data, columns = simulate(graph, 400, 12)
+    data += np.arange(5) * 2
+    events = []
+    result, history = execute('ges', data, columns, graph,
+        RunSettings(center=center, start_from_candidate=start,
+                    ges_phases=['forward', 'backward', 'turning'], ges_iterate=True), events.append)
+    output = Graph.model_validate(result['graph'])
+    raw, partition = graph_arrays(output, columns)
+    assert len(partition) == 5
+    assert history is None
+    assert result['score'] == pytest.approx(Scorer(data, columns, center).score(output)['score'])
+    assert result['diagnostics']['native_bic'] / len(data) == pytest.approx(result['score'])
+    assert events[0]['iteration'] == 0
+    assert events[-1]['score'] == pytest.approx(result['score'])
+    assert all(b['score'] >= a['score'] - 1e-8 for a, b in zip(events, events[1:]))
+    cpdag = dag_to_cpdag(raw)
+    reconstructed = np.zeros_like(cpdag)
+    ids = {c['id']: i for i,c in enumerate(columns)}
+    for e in result['cpdag_edges']:
+        a,b = ids[e['source']],ids[e['target']]
+        reconstructed[a,b] = 1
+        if not e['directed']:
+            reconstructed[b,a] = 1
+    np.testing.assert_array_equal(cpdag, reconstructed)
+
+
+def test_ges_rejects_collinear_columns_and_duplicate_phases():
+    graph = demo_graph()
+    data, columns = simulate(graph, 100, 3)
+    data[:,1] = data[:,0]
+    with pytest.raises(ValueError, match='independent'):
+        execute('ges', data, columns, graph, RunSettings(), lambda _: None)
+    with pytest.raises(ValueError, match='only once'):
+        validate_settings('ges', RunSettings(ges_phases=['forward', 'forward']))

@@ -29,6 +29,16 @@ REFINE = field("refine_partition", "Refine final partition", "boolean",
 
 
 REGISTRY = {
+    "ges": {
+        "id": "ges", "name": "GES · Gaussian BIC",
+        "description": "Greedy equivalence search with a separate noise variance per variable. Candidate colors are ignored. Returns a CPDAG and a consistent DAG for further exploration or search.",
+        "source": "ges 1.1.1 · ges.fit", "progress_unit": "accepted moves",
+        "fields": [field("ges_phases", "Search phases (in this order)", "multiselect", options=[
+            {"value": "forward", "label": "Forward · add"},
+            {"value": "backward", "label": "Backward · remove"},
+            {"value": "turning", "label": "Turning · reorient"}]),
+            field("ges_iterate", "Repeat phases until convergence", "boolean")] + COMMON[1:],
+    },
     "mcmc": {
         "id": "mcmc", "name": "MCMC", "description": "Search over DAGs and variance partitions with your MCMC implementation.",
         "source": "ColoredNodes/MCMCfuncs.py · CausalMCMC", "progress_unit": "iterations",
@@ -63,6 +73,10 @@ REGISTRY = {
 def validate_settings(algorithm, settings: RunSettings):
     if algorithm not in REGISTRY:
         raise ValueError("Unknown algorithm.")
+    if algorithm == "ges":
+        if len(set(settings.ges_phases)) != len(settings.ges_phases):
+            raise ValueError("Choose each GES phase only once.")
+        return []
     if algorithm == "greedy_dp" and settings.fixed_partition:
         raise ValueError("Greedy DP optimizes the partition and does not support fixing it.")
     if algorithm == "mcmc" and settings.mode == "map" and settings.target_bic is not None:
@@ -103,7 +117,10 @@ def execute(algorithm, data, columns, template, settings, progress):
         progress({"iteration": 0, "total": 0, "score": scored["score"], "best_score": scored["score"]})
         return {"graph": graph.model_dump(), "cpdag_edges": [], "score": scored["score"],
                 "score_details": scored, "diagnostics": {"num_iters": 0, "no_moves_available": True}}, None
-    if algorithm == "mcmc":
+    if algorithm == "ges":
+        from .ges_adapter import search
+        cpdag, partition, native_score, raw, diagnostics = search(data, initial, settings, progress)
+    elif algorithm == "mcmc":
         from ColoredNodes.MCMCfuncs import CausalMCMC
         probability = 0.0 if settings.fixed_partition else settings.color_probability
         output = CausalMCMC(data, num_iters=settings.num_iters, mode=settings.mode,

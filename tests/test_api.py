@@ -151,3 +151,34 @@ def test_algorithm_output_can_seed_next_algorithm_without_changing_old_run(clien
     history = np.load(io.BytesIO(client.get(f"/api/runs/{second['id']}/history").content), allow_pickle=False)
     assert history[0] == pytest.approx(first["result"]["score"])
     assert client.get(f"/api/runs/{first['id']}").json()["result"] == first["result"]
+
+
+def test_random_model_and_partition_endpoints(client):
+    workspace = client.get('/api/bootstrap').json()['workspace']
+    graph = workspace['candidate_graph']
+    generated = client.post('/api/graphs/random', json={'p':5, 'num_colors':2, 'graph':graph, 'density':1})
+    assert generated.status_code == 200
+    assert len(generated.json()['edges']) == 10
+    partition = client.post('/api/graphs/random-partition', json={'graph':generated.json(), 'num_colors':1})
+    assert partition.status_code == 200
+    assert partition.json()['edges'] == generated.json()['edges']
+    assert {n['group'] for n in partition.json()['nodes']} == {'1'}
+    assert client.post('/api/graphs/random', json={'graph':graph, 'p':6}).status_code == 422
+    assert len(client.get('/api/datasets').json()) == 1
+
+
+def test_ges_process_worker_and_candidate_export(client):
+    workspace = client.get('/api/bootstrap').json()['workspace']
+    run = client.post('/api/runs', json={'dataset_id':workspace['dataset_id'],
+        'graph':workspace['candidate_graph'], 'algorithm':'ges', 'settings':{}})
+    assert run.status_code == 202
+    key = run.json()['id']
+    deadline = time.monotonic()+20
+    while time.monotonic() < deadline:
+        record = client.get(f'/api/runs/{key}').json()
+        if record['status'] != 'running': break
+        time.sleep(0.1)
+    assert record['status'] == 'completed', record
+    scored = client.post('/api/score', json={'dataset_id':workspace['dataset_id'], 'graph':record['result']['graph']})
+    assert scored.status_code == 200
+    assert scored.json()['score'] == pytest.approx(record['result']['score'])

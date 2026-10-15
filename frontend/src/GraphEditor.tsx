@@ -1,5 +1,13 @@
-import { useCallback, useMemo, useRef, useState } from "react";
 import {
+  memo,
+  useCallback,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import {
+  applyNodeChanges,
   Background,
   BackgroundVariant,
   BaseEdge,
@@ -22,6 +30,7 @@ import type {
   EdgeProps,
 } from "@xyflow/react";
 import {
+  Dices,
   ArrowLeftRight,
   ArrowUpRight,
   CornerDownRight,
@@ -36,13 +45,18 @@ import {
 import type { ReactNode } from "react";
 import type { Graph } from "./types";
 import { clone, groupColor } from "./types";
+import { circularNodes } from "./graphLayout";
+import { RandomGraphMenu } from "./RandomGraphMenu";
 import { circleSegment } from "./edgeGeometry";
 
 type VariableFlowNode = FlowNode<
   { label: string; group: string; color: string },
   "variable"
 >;
-function VariableNode({ data, selected }: NodeProps<VariableFlowNode>) {
+const VariableNode = memo(function VariableNode({
+  data,
+  selected,
+}: NodeProps<VariableFlowNode>) {
   return (
     <div
       className={`variable-node ${selected ? "is-selected" : ""}`}
@@ -56,7 +70,7 @@ function VariableNode({ data, selected }: NodeProps<VariableFlowNode>) {
       <Handle type="source" position={Position.Right} />
     </div>
   );
-}
+});
 const nodeTypes = { variable: VariableNode };
 
 function CircleEdge(props: EdgeProps) {
@@ -131,7 +145,8 @@ function Editor({
   onError,
   displayEdges,
 }: Props) {
-  const flow = useReactFlow();
+  const flow = useReactFlow<VariableFlowNode>();
+  const [randomOpen, setRandomOpen] = useState(false);
   const [selected, setSelected] = useState<{
     kind: "node" | "edge";
     id: string;
@@ -159,42 +174,63 @@ function Editor({
     selected?.kind === "edge"
       ? graph.edges.find((e) => e.id === selected.id)
       : undefined;
-  const nodes = graph.nodes.map((n) => ({
-    id: n.id,
-    type: "variable" as const,
-    position: { x: n.x, y: n.y },
-    selected: selected?.kind === "node" && selected.id === n.id,
-    deletable: source && graph.nodes.length > 1,
-    data: {
-      label: n.label,
-      group: n.group,
-      color: groupColor(n.group, groups),
-    },
-  }));
-  const edges = (
-    displayEdges || graph.edges.map((e) => ({ ...e, directed: true }))
-  ).map((e, i) => ({
-    id: "id" in e ? String(e.id) : `result-${i}`,
-    source: e.source,
-    target: e.target,
-    markerEnd: e.directed
-      ? {
-          type: MarkerType.ArrowClosed,
-          width: 18,
-          height: 18,
-          color: "#637b70",
-        }
-      : undefined,
-    selected:
-      selected?.kind === "edge" &&
-      selected.id === ("id" in e ? e.id : `result-${i}`),
-    label: source && "weight" in e ? Number(e.weight).toFixed(2) : undefined,
-    style: { stroke: "#637b70", strokeWidth: 1.8 },
-    labelStyle: { fill: "#69766e", fontSize: 10 },
-    labelBgStyle: { fill: "#fafbf9" },
-    labelBgPadding: [5, 3] as [number, number],
-    type: "circle",
-  }));
+  const modelNodes = useMemo(
+    () =>
+      graph.nodes.map((n) => ({
+        id: n.id,
+        type: "variable" as const,
+        width: 88,
+        height: 88,
+        position: { x: n.x, y: n.y },
+        selected: selected?.kind === "node" && selected.id === n.id,
+        deletable: source && graph.nodes.length > 1,
+        data: {
+          label: n.label,
+          group: n.group,
+          color: groupColor(n.group, groups),
+        },
+      })),
+    [graph.nodes, selected, source, groups],
+  );
+  const [nodes, setNodes] = useState<VariableFlowNode[]>(modelNodes);
+  useLayoutEffect(() => {
+    if (dragStart.current) return;
+    setNodes((current) =>
+      modelNodes.map((node) => {
+        const previous = current.find((n) => n.id === node.id);
+        return { ...previous, ...node };
+      }),
+    );
+  }, [modelNodes]);
+  const edges = useMemo(
+    () =>
+      (displayEdges || graph.edges.map((e) => ({ ...e, directed: true }))).map(
+        (e, i) => ({
+          id: "id" in e ? String(e.id) : `result-${i}`,
+          source: e.source,
+          target: e.target,
+          markerEnd: e.directed
+            ? {
+                type: MarkerType.ArrowClosed,
+                width: 18,
+                height: 18,
+                color: "#637b70",
+              }
+            : undefined,
+          selected:
+            selected?.kind === "edge" &&
+            selected.id === ("id" in e ? e.id : `result-${i}`),
+          label:
+            source && "weight" in e ? Number(e.weight).toFixed(2) : undefined,
+          style: { stroke: "#637b70", strokeWidth: 1.8 },
+          labelStyle: { fill: "#69766e", fontSize: 10 },
+          labelBgStyle: { fill: "#fafbf9" },
+          labelBgPadding: [5, 3] as [number, number],
+          type: "circle",
+        }),
+      ),
+    [displayEdges, graph.edges, selected, source],
+  );
   function connect(connection: FlowConnection) {
     const { source: a, target: b } = connection;
     if (a === b || graph.edges.some((e) => e.source === a && e.target === b))
@@ -213,7 +249,7 @@ function Editor({
       ],
     });
   }
-  function changes(changes: NodeChange[]) {
+  function changes(changes: NodeChange<VariableFlowNode>[]) {
     const removed = changes.filter((c) => c.type === "remove").map((c) => c.id);
     if (removed.length && source && graph.nodes.length > removed.length) {
       commit({
@@ -226,9 +262,19 @@ function Editor({
       setSelected(null);
       return;
     }
-    const positions = changes.filter((c) => c.type === "position");
-    if (positions.length)
-      onChange({
+    // Preserve React Flow's dimensions, selection and dragging state locally.
+    // Persist positions once on release, avoiding full app renders and autosave
+    // while the pointer is moving.
+    setNodes((current) =>
+      applyNodeChanges(
+        changes.filter((c) => c.type !== "remove"),
+        current,
+      ),
+    );
+    const positions = changes.filter(c => c.type === "position");
+    if (!readOnly && !dragStart.current && positions.length) {
+      // Keyboard arrow moves do not emit pointer drag callbacks.
+      commit({
         ...graph,
         nodes: graph.nodes.map((n) => {
           const change = positions.find((c) => c.id === n.id);
@@ -237,7 +283,9 @@ function Editor({
             : n;
         }),
       });
+    }
   }
+
   function updateNode(update: Partial<(typeof graph.nodes)[number]>) {
     if (node)
       commit({
@@ -284,31 +332,27 @@ function Editor({
     setSelected({ kind: "node", id: next.id });
   }
   function layout() {
-    const level: Record<string, number> = {};
-    for (let pass = 0; pass < graph.nodes.length; pass++)
-      for (const n of graph.nodes)
-        level[n.id] = Math.max(
-          0,
-          ...graph.edges
-            .filter((e) => e.target === n.id)
-            .map((e) => (level[e.source] || 0) + 1),
-        );
-    const rows: Record<number, number> = {};
-    const next = {
-      ...graph,
-      nodes: graph.nodes.map((n) => {
-        const l = level[n.id];
-        const row = rows[l] || 0;
-        rows[l] = row + 1;
-        return { ...n, x: 60 + l * 210, y: 80 + row * 150 };
-      }),
-    };
+    const next = { ...graph, nodes: circularNodes(graph.nodes) };
     if (readOnly) onChange(next);
     else commit(next);
     requestAnimationFrame(() => flow.fitView({ padding: 0.2, duration: 300 }));
   }
   return (
     <div className={`editor-grid ${compact ? "compact" : ""}`}>
+      {randomOpen && (
+        <RandomGraphMenu
+          graph={graph}
+          source={source}
+          onClose={() => setRandomOpen(false)}
+          onApply={(next) => {
+            commit(next);
+            setSelected(null);
+            requestAnimationFrame(() =>
+              flow.fitView({ padding: 0.23, duration: 300 }),
+            );
+          }}
+        />
+      )}
       <section className="canvas-card">
         <div className="canvas-toolbar">
           <div className="canvas-title">
@@ -351,10 +395,15 @@ function Editor({
             {!readOnly && (
               <button
                 aria-label="Arrange graph"
-                title="Arrange graph"
+                title="Arrange graph in a circle"
                 onClick={layout}
               >
                 <LayoutGrid size={16} />
+              </button>
+            )}
+            {!readOnly && (
+              <button className="small-add" onClick={() => setRandomOpen(true)}>
+                <Dices size={15} /> Random
               </button>
             )}
             {source && !readOnly && (
@@ -381,7 +430,7 @@ function Editor({
             elementsSelectable={!readOnly}
             deleteKeyCode={readOnly ? null : ["Backspace", "Delete"]}
             onConnect={connect}
-            onNodesChange={readOnly ? undefined : changes}
+            onNodesChange={changes}
             onNodeDragStart={() => {
               dragStart.current = clone(graph);
             }}
@@ -390,7 +439,19 @@ function Editor({
               if (previous) {
                 setPast((p) => [...p.slice(-39), previous]);
                 setFuture([]);
+                const positions = new Map(
+                  flow.getNodes().map((n) => [n.id, n.position]),
+                );
                 dragStart.current = null;
+                onChange({
+                  ...graph,
+                  nodes: graph.nodes.map((n) => {
+                    const position = positions.get(n.id);
+                    return position
+                      ? { ...n, x: position.x, y: position.y }
+                      : n;
+                  }),
+                });
               }
             }}
             onNodeClick={(_, n) => setSelected({ kind: "node", id: n.id })}

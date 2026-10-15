@@ -7,10 +7,11 @@ if [ ! -x .venv/bin/python ]; then
   echo "Preparing DAG Lab's Python environment (first launch only)…"
   python3 -m venv .venv
 fi
-if [ ! -f .venv/.daglab-ready ]; then
+dependency_hash="$(shasum -a 256 requirements-lock.txt pyproject.toml | shasum -a 256)"
+if [ ! -f .venv/.daglab-ready ] || [ "$(cat .venv/.daglab-ready)" != "$dependency_hash" ]; then
   .venv/bin/python -m pip install -r requirements-lock.txt
   .venv/bin/python -m pip install --no-deps -e .
-  touch .venv/.daglab-ready
+  echo "$dependency_hash" > .venv/.daglab-ready
 fi
 if [ ! -f frontend/dist/index.html ]; then
   if ! command -v npm >/dev/null 2>&1; then

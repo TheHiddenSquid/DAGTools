@@ -2575,3 +2575,45 @@ tbody tr:last-child td {
     padding: 24px;
   }
 }
+
+.random-modal {
+  max-width: 620px;
+}
+.random-modal h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.random-fields {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px 20px;
+  margin: 18px 0;
+}
+.random-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  margin-top: 22px;
+}
+.run-progress.indeterminate > span {
+  animation: ges-searching 1.6s ease-in-out infinite alternate;
+}
+@keyframes ges-searching {
+  from {
+    transform: translateX(0);
+  }
+  to {
+    transform: translateX(180%);
+  }
+}
+@media (max-width: 600px) {
+  .random-fields {
+    grid-template-columns: 1fr;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .run-progress.indeterminate > span {
+    animation: none;
+  }
+}

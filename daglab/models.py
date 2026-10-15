@@ -67,6 +67,47 @@ class GenerateRequest(Model):
     name: str = Field(default="Generated sample", min_length=1, max_length=120)
 
 
+class RandomParameters(Model):
+    num_colors: int = Field(default=3, ge=1, le=100)
+    omega_min: float = Field(default=0.2, gt=0)
+    omega_max: float = Field(default=2.0, gt=0)
+    seed: int = Field(default=42, ge=0, le=2**32-1)
+
+    @model_validator(mode="after")
+    def ordered_variances(self):
+        if self.omega_max < self.omega_min:
+            raise ValueError("omega_max must be at least omega_min.")
+        return self
+
+
+class RandomGraphRequest(RandomParameters):
+    p: int = Field(default=5, ge=1, le=100)
+    density: float = Field(default=0.5, ge=0, le=1)
+    lambda_min: float = Field(default=0.25, ge=0)
+    lambda_max: float = Field(default=1.0, ge=0)
+    graph: Graph | None = None
+
+    @model_validator(mode="after")
+    def valid_parameters(self):
+        if self.lambda_max < self.lambda_min:
+            raise ValueError("lambda_max must be at least lambda_min.")
+        if self.num_colors > self.p:
+            raise ValueError("The number of available groups cannot exceed p.")
+        if self.graph is not None and len(self.graph.nodes) != self.p:
+            raise ValueError("p must match the existing variables.")
+        return self
+
+
+class RandomPartitionRequest(RandomParameters):
+    graph: Graph
+
+    @model_validator(mode="after")
+    def valid_groups(self):
+        if self.num_colors > len(self.graph.nodes):
+            raise ValueError("The number of available groups cannot exceed p.")
+        return self
+
+
 class ScoreRequest(Model):
     graph: Graph
     dataset_id: str
@@ -89,6 +130,8 @@ class RunSettings(Model):
     target_bic: float | None = None
     record_history: bool = False
     chunk_size: int = Field(default=10000, ge=1, le=1_000_000)
+    ges_phases: list[Literal["forward", "backward", "turning"]] = Field(default_factory=lambda: ["forward", "backward"], min_length=1, max_length=3)
+    ges_iterate: bool = False
 
 
 class RunRequest(Model):
@@ -110,7 +153,7 @@ class Workspace(Model):
 
 
 def demo_graph() -> Graph:
-    return Graph.model_validate({
+    graph = Graph.model_validate({
         "nodes": [{"id": f"x{i+1}", "label": f"X{i+1}", "group": group, "x": x, "y": y}
                   for i, (group, x, y) in enumerate([
                       ("1", 50, 160), ("1", 260, 40), ("2", 260, 280), ("2", 480, 160), ("3", 700, 160)])],
@@ -118,3 +161,6 @@ def demo_graph() -> Graph:
                   for a, b, w in [(1, 2, 0.8), (1, 3, -0.6), (2, 4, 0.7), (3, 4, 0.9), (4, 5, -0.8)]],
         "variances": {"1": 0.5, "2": 1.0, "3": 1.6},
     })
+
+    from .generation import circular_layout
+    return circular_layout(graph)

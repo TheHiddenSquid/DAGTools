@@ -1,5 +1,11 @@
 import type { TracePoint } from "./types";
-export function ScoreChart({ trace }: { trace: TracePoint[] }) {
+export function ScoreChart({
+  trace,
+  unit = "iterations",
+}: {
+  trace: TracePoint[];
+  unit?: string;
+}) {
   if (trace.length < 2)
     return (
       <div className="chart-empty">
@@ -23,7 +29,7 @@ export function ScoreChart({ trace }: { trace: TracePoint[] }) {
       <svg
         viewBox="0 0 780 157"
         role="img"
-        aria-label="Current and best BIC score over search iterations"
+        aria-label={`Current and best BIC score over ${unit}`}
       >
         <defs>
           <linearGradient id="chartFill" x1="0" y1="0" x2="0" y2="1">
@@ -66,7 +72,7 @@ export function ScoreChart({ trace }: { trace: TracePoint[] }) {
           0
         </text>
         <text x="748" y="149" textAnchor="end">
-          {last.toLocaleString()} iterations
+          {last.toLocaleString()} {unit}
         </text>
       </svg>
     </div>
