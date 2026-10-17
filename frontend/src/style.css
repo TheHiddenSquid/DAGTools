@@ -761,14 +761,9 @@ main {
   color: color-mix(in srgb, var(--node-color) 80%, #24372f);
   margin-top: 4px;
 }
-.react-flow__handle {
-  background: #b5c4aa !important;
-  width: 6px !important;
-  height: 6px !important;
-  border: 1.5px solid #fff !important;
-}
-.react-flow__handle:hover {
-  background: #62864e !important;
+.variable-node .react-flow__handle {
+  /* Keep handles measurable for React Flow without drawing connection dots. */
+  opacity: 0;
 }
 .react-flow__edge.selected .react-flow__edge-path {
   stroke: #326c56 !important;

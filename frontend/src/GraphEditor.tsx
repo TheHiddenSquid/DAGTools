@@ -482,7 +482,6 @@ function Editor({
               {source
                 ? "Draw connections to define your model"
                 : "Connect variables to explore a structure"}
-              <span>Drag from a node’s right port</span>
             </div>
           )}
         </div>
